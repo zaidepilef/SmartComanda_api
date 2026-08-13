@@ -1,8 +1,11 @@
 import express from "express";
 import cors from "cors";
 import { env } from "./config/env.js";
-import { connectMongo, closeMongo } from "./db/mongo.js";
+import { connectMongo, closeMongo, getMongoClient } from "./db/mongo.js";
+import { runMigrations } from "./db/migrations.js";
 import healthRouter from "./routes/health.js";
+import usersRouter from "./routes/users.js";
+import authRouter from "./routes/auth.js";
 
 const app = express();
 
@@ -17,13 +20,17 @@ app.get("/", (req, res) => {
 });
 
 app.use("/health", healthRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/users", usersRouter);
 
 async function start() {
   try {
     await connectMongo(env.mongodbUri);
     console.log(`MongoDB connected: ${env.mongodbUri}`);
+
+    await runMigrations(getMongoClient().db());
   } catch (error) {
-    console.error("Failed to connect to MongoDB:", error.message);
+    console.error("Failed to start:", error.message);
     process.exit(1);
   }
 
