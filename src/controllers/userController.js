@@ -1,7 +1,11 @@
-import { ConflictError, NotFoundError } from "../utils/errors.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
 import * as userService from "../services/userService.js";
 
 function mapError(error) {
+  if (error instanceof BadRequestError) {
+    return { status: 400, body: { error: error.message } };
+  }
+
   if (error instanceof NotFoundError) {
     return { status: 404, body: { error: error.message } };
   }

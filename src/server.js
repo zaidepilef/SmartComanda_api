@@ -6,6 +6,7 @@ import { runMigrations } from "./db/migrations.js";
 import healthRouter from "./routes/health.js";
 import usersRouter from "./routes/users.js";
 import authRouter from "./routes/auth.js";
+import tenantsRouter from "./routes/tenants.js";
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.get("/", (req, res) => {
 app.use("/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/tenants", tenantsRouter);
 
 async function start() {
   try {

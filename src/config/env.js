@@ -11,6 +11,8 @@ const MIN_JWT_SECRET_LENGTH = 32;
 
 const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || "";
 
+const SYSADMIN_EMAIL = process.env.SYSADMIN_EMAIL || "fel.di.rod@gmail.com";
+
 if (JWT_SECRET.length < MIN_JWT_SECRET_LENGTH) {
   console.error(
     "JWT_SECRET is missing or too short (minimum 32 characters). Set it in the environment before starting the API."
@@ -30,4 +32,5 @@ export const env = {
   jwtSecret: JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
   turnstileSecretKey: TURNSTILE_SECRET_KEY,
+  sysadminEmail: SYSADMIN_EMAIL,
 };

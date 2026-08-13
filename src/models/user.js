@@ -12,6 +12,20 @@ export const USER_STATUSES = Object.freeze([
   USER_STATUS.PENDING,
 ]);
 
+export const USER_ROLES = Object.freeze({
+  SYSADMIN: "sysadmin",
+  OWNER: "owner",
+  ADMIN: "admin",
+  CASHIER: "cashier",
+});
+
+export const USER_ROLES_LIST = Object.freeze([
+  USER_ROLES.SYSADMIN,
+  USER_ROLES.OWNER,
+  USER_ROLES.ADMIN,
+  USER_ROLES.CASHIER,
+]);
+
 export function toPublicUser(user) {
   if (!user) {
     return null;
@@ -24,7 +38,7 @@ export function toPublicUser(user) {
 export function toUserDocument(user) {
   const now = new Date();
 
-  return {
+  const document = {
     firstName: user.firstName,
     lastName: user.lastName,
     email: user.email,
@@ -33,6 +47,20 @@ export function toUserDocument(user) {
     createdAt: now,
     updatedAt: now,
   };
+
+  if (user.name) {
+    document.name = user.name;
+  }
+
+  if (user.role) {
+    document.role = user.role;
+  }
+
+  if (user.tenantId) {
+    document.tenantId = user.tenantId;
+  }
+
+  return document;
 }
 
 export function toUserObjectId(id) {

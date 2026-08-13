@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { USER_STATUSES } from "../models/user.js";
+import { USER_ROLES_LIST, USER_STATUSES } from "../models/user.js";
+
+const OBJECT_ID_PATTERN = /^[0-9a-fA-F]{24}$/;
 
 export const createUserSchema = z.object({
   firstName: z.string().trim().min(1, "firstName is required."),
@@ -7,11 +9,19 @@ export const createUserSchema = z.object({
   email: z.email("A valid email is required.").toLowerCase(),
   password: z.string().min(8, "password must be at least 8 characters."),
   status: z.enum(USER_STATUSES).optional(),
+  name: z.string().trim().min(1).optional(),
+  role: z.enum(USER_ROLES_LIST).optional(),
+  tenantId: z
+    .string()
+    .regex(OBJECT_ID_PATTERN, "tenantId must be a valid ObjectId.")
+    .optional(),
 });
 
-export const registerUserSchema = createUserSchema.extend({
-  captchaToken: z.string().min(1, "captchaToken is required."),
-});
+export const registerUserSchema = createUserSchema
+  .omit({ name: true, role: true, tenantId: true })
+  .extend({
+    captchaToken: z.string().min(1, "captchaToken is required."),
+  });
 
 export const updateUserSchema = z
   .object({
@@ -20,6 +30,12 @@ export const updateUserSchema = z
     email: z.email("A valid email is required.").toLowerCase().optional(),
     password: z.string().min(8, "password must be at least 8 characters.").optional(),
     status: z.enum(USER_STATUSES).optional(),
+    name: z.string().trim().min(1).optional(),
+    role: z.enum(USER_ROLES_LIST).optional(),
+    tenantId: z
+      .string()
+      .regex(OBJECT_ID_PATTERN, "tenantId must be a valid ObjectId.")
+      .optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field must be provided.",
