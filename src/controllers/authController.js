@@ -1,6 +1,9 @@
 import * as authService from "../services/authService.js";
 import * as userService from "../services/userService.js";
+import { verifyTurnstileToken } from "../services/captchaService.js";
+import { USER_STATUS } from "../models/user.js";
 import {
+  BadRequestError,
   ConflictError,
   ForbiddenError,
   NotFoundError,
@@ -8,6 +11,10 @@ import {
 } from "../utils/errors.js";
 
 function mapError(error) {
+  if (error instanceof BadRequestError) {
+    return { status: 400, body: { error: error.message } };
+  }
+
   if (error instanceof UnauthorizedError) {
     return { status: 401, body: { error: error.message } };
   }
@@ -44,7 +51,18 @@ export async function login(req, res) {
 
 export async function register(req, res) {
   try {
-    const user = await userService.createUserWithPassword(req.body);
+    const { captchaToken, ...userInput } = req.body;
+
+    const isHuman = await verifyTurnstileToken(captchaToken, req.ip);
+
+    if (!isHuman) {
+      throw new BadRequestError("Captcha verification failed.");
+    }
+
+    const user = await userService.createUserWithPassword({
+      ...userInput,
+      status: USER_STATUS.PENDING,
+    });
     return res.status(201).json(user);
   } catch (error) {
     return handleError(res, error);

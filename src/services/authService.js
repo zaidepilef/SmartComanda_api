@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { findUserByEmail, findUserById } from "../repositories/userRepository.js";
 import { revokeToken } from "../repositories/revokedTokenRepository.js";
-import { toPublicUser } from "../models/user.js";
+import { toPublicUser, USER_STATUS } from "../models/user.js";
 import {
   ForbiddenError,
   UnauthorizedError,
@@ -33,7 +33,11 @@ export async function login(email, password) {
     throw new UnauthorizedError(GENERIC_LOGIN_ERROR);
   }
 
-  if (user.status !== "active") {
+  if (user.status === USER_STATUS.PENDING) {
+    throw new ForbiddenError("This account awaits verification.");
+  }
+
+  if (user.status !== USER_STATUS.ACTIVE) {
     throw new ForbiddenError("This account is inactive.");
   }
 

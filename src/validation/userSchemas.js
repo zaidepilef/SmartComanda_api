@@ -9,6 +9,10 @@ export const createUserSchema = z.object({
   status: z.enum(USER_STATUSES).optional(),
 });
 
+export const registerUserSchema = createUserSchema.extend({
+  captchaToken: z.string().min(1, "captchaToken is required."),
+});
+
 export const updateUserSchema = z
   .object({
     firstName: z.string().trim().min(1).optional(),

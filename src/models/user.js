@@ -3,9 +3,14 @@ import { ObjectId } from "mongodb";
 export const USER_STATUS = Object.freeze({
   ACTIVE: "active",
   INACTIVE: "inactive",
+  PENDING: "pending",
 });
 
-export const USER_STATUSES = Object.freeze([USER_STATUS.ACTIVE, USER_STATUS.INACTIVE]);
+export const USER_STATUSES = Object.freeze([
+  USER_STATUS.ACTIVE,
+  USER_STATUS.INACTIVE,
+  USER_STATUS.PENDING,
+]);
 
 export function toPublicUser(user) {
   if (!user) {

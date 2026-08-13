@@ -19,6 +19,13 @@ export class ConflictError extends DomainError {
   }
 }
 
+export class BadRequestError extends DomainError {
+  constructor(message) {
+    super(message);
+    this.name = "BadRequestError";
+  }
+}
+
 export class UnauthorizedError extends DomainError {
   constructor(message) {
     super(message);
