@@ -1,7 +1,9 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { findUserByEmail, findUserById } from "../repositories/userRepository.js";
+import { revokeToken } from "../repositories/revokedTokenRepository.js";
 import { toPublicUser } from "../models/user.js";
 import {
   ForbiddenError,
@@ -49,6 +51,7 @@ export function issueToken(user) {
     {
       email: user.email,
       status: user.status,
+      jti: randomUUID(),
     },
     env.jwtSecret,
     {
@@ -66,4 +69,23 @@ function getTokenExpirySeconds(token) {
 
 export async function getAuthenticatedUser(userId) {
   return findUserById(userId);
+}
+
+export async function logout(token) {
+  let payload;
+
+  try {
+    payload = jwt.verify(token, env.jwtSecret);
+  } catch {
+    throw new UnauthorizedError("Invalid or expired token.");
+  }
+
+  if (!payload.jti) {
+    return;
+  }
+
+  await revokeToken({
+    jti: payload.jti,
+    expiresAt: new Date(payload.exp * 1000),
+  });
 }

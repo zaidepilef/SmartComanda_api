@@ -54,3 +54,12 @@ export async function register(req, res) {
 export async function me(req, res) {
   return res.json(req.user);
 }
+
+export async function logout(req, res) {
+  try {
+    await authService.logout(req.token);
+    return res.status(204).send();
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
