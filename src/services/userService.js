@@ -8,12 +8,29 @@ import {
 } from "../repositories/userRepository.js";
 import { findTenantById, toTenantObjectId } from "../repositories/tenantRepository.js";
 import { toPublicUser, toUserDocument } from "../models/user.js";
-import { BadRequestError, NotFoundError } from "../utils/errors.js";
+import {
+  BadRequestError,
+  ForbiddenError,
+  NotFoundError,
+} from "../utils/errors.js";
+import {
+  assertUserPayloadScoped,
+  canManageUser,
+  canReadUser,
+  getTenantFilter,
+  isGlobalActor,
+} from "../utils/tenantScope.js";
 
 const BCRYPT_COST = 10;
 
 function mapToPublic(user) {
   return toPublicUser(user);
+}
+
+function assertCanWriteUsers(actor) {
+  if (!isGlobalActor(actor) && actor?.role !== "admin") {
+    throw new ForbiddenError("Forbidden. Sysadmin or admin role required.");
+  }
 }
 
 async function resolveTenantId(tenantId) {
@@ -36,31 +53,48 @@ async function resolveTenantId(tenantId) {
   return objectId;
 }
 
-export async function createUserWithPassword(userInput) {
+export async function createUserWithPassword({ actor, ...userInput }) {
+  assertCanWriteUsers(actor);
+  assertUserPayloadScoped(actor, userInput);
+
   const passwordHash = await bcrypt.hash(userInput.password, BCRYPT_COST);
-  const tenantId = await resolveTenantId(userInput.tenantId);
+  const tenantId =
+    !isGlobalActor(actor) && !userInput.tenantId
+      ? actor.tenantId
+      : await resolveTenantId(userInput.tenantId);
+
   const user = await createUser(
     toUserDocument({ ...userInput, passwordHash, tenantId })
   );
   return mapToPublic(user);
 }
 
-export async function getUser(id) {
+export async function getUser({ actor, id }) {
   const user = await findUserById(id);
 
   if (!user) {
     throw new NotFoundError("User not found.");
   }
 
+  if (!canReadUser(actor, user)) {
+    throw new ForbiddenError("Forbidden. You can only access users of your own tenant.");
+  }
+
   return mapToPublic(user);
 }
 
-export async function updateUserById(id, userInput) {
+export async function updateUserById({ actor, id, ...userInput }) {
   const existing = await findUserById(id);
 
   if (!existing) {
     throw new NotFoundError("User not found.");
   }
+
+  if (!canManageUser(actor, existing)) {
+    throw new ForbiddenError("Forbidden. You can only manage users of your own tenant.");
+  }
+
+  assertUserPayloadScoped(actor, userInput);
 
   const update = { ...userInput };
   const tenantId = await resolveTenantId(userInput.tenantId);
@@ -79,7 +113,11 @@ export async function updateUserById(id, userInput) {
   return mapToPublic(user);
 }
 
-export async function deleteUserById(id) {
+export async function deleteUserById({ actor, id }) {
+  if (!isGlobalActor(actor)) {
+    throw new ForbiddenError("Forbidden. Sysadmin role required.");
+  }
+
   const deletedCount = await deleteUser(id);
 
   if (deletedCount === 0) {
@@ -87,8 +125,9 @@ export async function deleteUserById(id) {
   }
 }
 
-export async function listUsersPaginated({ page, limit, status }) {
-  const { items, total } = await listUsers({ page, limit, status });
+export async function listUsersPaginated({ actor, page, limit, status }) {
+  const { tenantId } = getTenantFilter(actor);
+  const { items, total } = await listUsers({ page, limit, status, tenantId });
 
   return {
     data: items.map(mapToPublic),

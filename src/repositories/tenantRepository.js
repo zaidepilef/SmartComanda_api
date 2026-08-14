@@ -60,11 +60,15 @@ export async function updateTenant(id, update) {
   }
 }
 
-export async function listTenants({ active } = {}) {
+export async function listTenants({ active, id } = {}) {
   const filter = {};
 
   if (active !== undefined) {
     filter.active = active;
+  }
+
+  if (id) {
+    filter._id = toTenantObjectId(id);
   }
 
   return getTenantsCollection()

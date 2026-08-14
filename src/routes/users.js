@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as userController from "../controllers/userController.js";
 import authRequired from "../middleware/authRequired.js";
 import requireSysadmin from "../middleware/requireSysadmin.js";
+import requireSysadminOrAdmin from "../middleware/requireSysadminOrAdmin.js";
 import { validateBody, validateQuery } from "../middleware/validation.js";
 import {
   createUserSchema,
@@ -14,9 +15,9 @@ const router = Router();
 router.use(authRequired);
 
 router.get("/", validateQuery(listUsersQuerySchema), userController.listUsers);
-router.post("/", requireSysadmin, validateBody(createUserSchema), userController.createUser);
+router.post("/", requireSysadminOrAdmin, validateBody(createUserSchema), userController.createUser);
 router.get("/:id", userController.getUser);
-router.put("/:id", requireSysadmin, validateBody(updateUserSchema), userController.updateUser);
+router.put("/:id", requireSysadminOrAdmin, validateBody(updateUserSchema), userController.updateUser);
 router.delete("/:id", requireSysadmin, userController.deleteUser);
 
 export default router;

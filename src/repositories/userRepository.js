@@ -76,11 +76,15 @@ export async function deleteUser(id) {
   return result.deletedCount;
 }
 
-export async function listUsers({ page, limit, status }) {
+export async function listUsers({ page, limit, status, tenantId } = {}) {
   const filter = {};
 
   if (status) {
     filter.status = status;
+  }
+
+  if (tenantId) {
+    filter.tenantId = tenantId;
   }
 
   const [items, total] = await Promise.all([

@@ -1,13 +1,14 @@
 import * as tenantRepository from "../repositories/tenantRepository.js";
+import { isGlobalActor } from "../utils/tenantScope.js";
 
-export async function listTenants({ active } = {}) {
-  const filter = {};
+export async function listTenants({ actor, active } = {}) {
+  const normalizedActive = active === undefined ? undefined : active === true || active === "true";
 
-  if (active !== undefined) {
-    filter.active = active === true || active === "true";
+  if (isGlobalActor(actor)) {
+    return tenantRepository.listTenants({ active: normalizedActive });
   }
 
-  return tenantRepository.listTenants(filter);
+  return tenantRepository.listTenants({ active: normalizedActive, id: actor.tenantId });
 }
 
 export async function createTenant(tenantInput) {

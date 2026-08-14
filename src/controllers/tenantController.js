@@ -1,9 +1,13 @@
-import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import * as tenantService from "../services/tenantService.js";
 
 function mapError(error) {
   if (error instanceof BadRequestError) {
     return { status: 400, body: { error: error.message } };
+  }
+
+  if (error instanceof ForbiddenError) {
+    return { status: 403, body: { error: error.message } };
   }
 
   if (error instanceof NotFoundError) {
@@ -24,7 +28,10 @@ function handleError(res, error) {
 
 export async function listTenants(req, res) {
   try {
-    const tenants = await tenantService.listTenants(req.validatedQuery);
+    const tenants = await tenantService.listTenants({
+      actor: req.user,
+      ...req.validatedQuery,
+    });
     return res.json(tenants);
   } catch (error) {
     return handleError(res, error);

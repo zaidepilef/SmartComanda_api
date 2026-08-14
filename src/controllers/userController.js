@@ -1,9 +1,13 @@
-import { BadRequestError, ConflictError, NotFoundError } from "../utils/errors.js";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import * as userService from "../services/userService.js";
 
 function mapError(error) {
   if (error instanceof BadRequestError) {
     return { status: 400, body: { error: error.message } };
+  }
+
+  if (error instanceof ForbiddenError) {
+    return { status: 403, body: { error: error.message } };
   }
 
   if (error instanceof NotFoundError) {
@@ -24,7 +28,10 @@ function handleError(res, error) {
 
 export async function createUser(req, res) {
   try {
-    const user = await userService.createUserWithPassword(req.body);
+    const user = await userService.createUserWithPassword({
+      actor: req.user,
+      ...req.body,
+    });
     return res.status(201).json(user);
   } catch (error) {
     return handleError(res, error);
@@ -33,7 +40,7 @@ export async function createUser(req, res) {
 
 export async function getUser(req, res) {
   try {
-    const user = await userService.getUser(req.params.id);
+    const user = await userService.getUser({ actor: req.user, id: req.params.id });
     return res.json(user);
   } catch (error) {
     return handleError(res, error);
@@ -42,7 +49,11 @@ export async function getUser(req, res) {
 
 export async function updateUser(req, res) {
   try {
-    const user = await userService.updateUserById(req.params.id, req.body);
+    const user = await userService.updateUserById({
+      actor: req.user,
+      id: req.params.id,
+      ...req.body,
+    });
     return res.json(user);
   } catch (error) {
     return handleError(res, error);
@@ -51,7 +62,7 @@ export async function updateUser(req, res) {
 
 export async function deleteUser(req, res) {
   try {
-    await userService.deleteUserById(req.params.id);
+    await userService.deleteUserById({ actor: req.user, id: req.params.id });
     return res.status(204).end();
   } catch (error) {
     return handleError(res, error);
@@ -60,7 +71,10 @@ export async function deleteUser(req, res) {
 
 export async function listUsers(req, res) {
   try {
-    const result = await userService.listUsersPaginated(req.validatedQuery);
+    const result = await userService.listUsersPaginated({
+      actor: req.user,
+      ...req.validatedQuery,
+    });
     return res.json(result);
   } catch (error) {
     return handleError(res, error);
