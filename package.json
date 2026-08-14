@@ -4,7 +4,14 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "db:up": "bash ../scripts/db-up.sh",
+    "db:down": "bash ../scripts/db-down.sh",
+    "db:status": "bash ../scripts/db-status.sh",
+    "db:backup:local": "bash ../scripts/db-backup-local.sh",
+    "db:restore:local": "bash ../scripts/db-restore-local.sh",
+    "db:backup:atlas": "bash ../scripts/db-backup-atlas.sh",
+    "db:restore:atlas": "bash ../scripts/db-restore-atlas.sh"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
