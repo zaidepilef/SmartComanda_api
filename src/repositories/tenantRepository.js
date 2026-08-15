@@ -4,6 +4,7 @@ import { ConflictError, NotFoundError } from "../utils/errors.js";
 
 const TENANTS_COLLECTION = "tenants";
 const USERS_COLLECTION = "users";
+const BRANCHES_COLLECTION = "branches";
 
 function getTenantsCollection() {
   return getMongoClient().db().collection(TENANTS_COLLECTION);
@@ -83,8 +84,21 @@ export async function listTenants({ active, id } = {}) {
           as: "users",
         },
       },
-      { $addFields: { userCount: { $size: "$users" } } },
-      { $project: { users: 0 } },
+      {
+        $lookup: {
+          from: BRANCHES_COLLECTION,
+          localField: "_id",
+          foreignField: "tenantId",
+          as: "branches",
+        },
+      },
+      {
+        $addFields: {
+          userCount: { $size: "$users" },
+          branchCount: { $size: "$branches" },
+        },
+      },
+      { $project: { users: 0, branches: 0 } },
     ])
     .toArray();
 }

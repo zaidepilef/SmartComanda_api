@@ -7,6 +7,7 @@ import healthRouter from "./routes/health.js";
 import usersRouter from "./routes/users.js";
 import authRouter from "./routes/auth.js";
 import tenantsRouter from "./routes/tenants.js";
+import branchesRouter from "./routes/branches.js";
 
 const app = express();
 
@@ -24,6 +25,7 @@ app.use("/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/tenants", tenantsRouter);
+app.use("/api/branches", branchesRouter);
 
 async function start() {
   try {
