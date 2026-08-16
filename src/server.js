@@ -8,6 +8,10 @@ import usersRouter from "./routes/users.js";
 import authRouter from "./routes/auth.js";
 import tenantsRouter from "./routes/tenants.js";
 import branchesRouter from "./routes/branches.js";
+import ingredientsRouter from "./routes/ingredients.js";
+import dishesRouter from "./routes/dishes.js";
+import inventoryRouter from "./routes/inventory.js";
+import ordersRouter from "./routes/orders.js";
 
 const app = express();
 
@@ -26,6 +30,10 @@ app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/tenants", tenantsRouter);
 app.use("/api/branches", branchesRouter);
+app.use("/api/ingredients", ingredientsRouter);
+app.use("/api/dishes", dishesRouter);
+app.use("/api/inventory", inventoryRouter);
+app.use("/api/orders", ordersRouter);
 
 async function start() {
   try {

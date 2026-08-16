@@ -112,3 +112,23 @@ export async function findTenantById(id) {
 
   return getTenantsCollection().findOne({ _id: objectId });
 }
+
+export async function updateTenantWarehouseMode(id, warehouseMode) {
+  const objectId = toTenantObjectId(id);
+
+  if (!objectId) {
+    throw new NotFoundError("Tenant not found.");
+  }
+
+  const result = await getTenantsCollection().findOneAndUpdate(
+    { _id: objectId },
+    { $set: { warehouseMode, updatedAt: new Date() } },
+    { returnDocument: "after" }
+  );
+
+  if (!result) {
+    throw new NotFoundError("Tenant not found.");
+  }
+
+  return result;
+}
