@@ -132,6 +132,8 @@ export async function createDish(actor, dishInput) {
     salePrice: dishInput.salePrice,
     active: dishInput.active,
     description: dishInput.description,
+    category: dishInput.category,
+    icon: dishInput.icon,
     recipe: dishInput.recipe.map(toRecipeLine),
     ...(dishInput.branchPrices !== undefined
       ? { branchPrices: dishInput.branchPrices.map(toBranchPrice) }

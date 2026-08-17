@@ -43,7 +43,9 @@ export async function listBranches(actor, { tenantId, active, q } = {}) {
     filter.q = q;
   }
 
-  return branchRepository.listBranches({ ...filter, active: normalizedActive });
+  const effectiveActive = actor?.role === "cashier" ? true : normalizedActive;
+
+  return branchRepository.listBranches({ ...filter, active: effectiveActive });
 }
 
 export async function createBranch(actor, branchInput) {

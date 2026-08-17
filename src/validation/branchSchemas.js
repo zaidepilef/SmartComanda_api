@@ -1,8 +1,13 @@
 import { z } from "zod";
+import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 
 export const BRANCH_TYPES = ["Sucursal", "FoodTruck"];
 
 const OBJECT_ID_PATTERN = /^[0-9a-fA-F]{24}$/;
+
+const paymentMethodsSchema = z
+  .array(z.enum(PAYMENT_METHODS))
+  .min(1, "At least one payment method is required.");
 
 export const listBranchesQuerySchema = z.object({
   tenantId: z
@@ -23,6 +28,7 @@ export const createBranchSchema = z.object({
   city: z.string().trim().min(1).optional(),
   phone: z.string().trim().min(1).optional(),
   active: z.boolean().default(true),
+  paymentMethods: paymentMethodsSchema.optional(),
 });
 
 export const updateBranchSchema = z
@@ -37,6 +43,7 @@ export const updateBranchSchema = z
     city: z.string().trim().min(1).optional(),
     phone: z.string().trim().min(1).optional(),
     active: z.boolean().optional(),
+    paymentMethods: paymentMethodsSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field must be provided.",

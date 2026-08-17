@@ -1,4 +1,9 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from "../utils/errors.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../utils/errors.js";
 import * as orderService from "../services/orderService.js";
 
 function mapError(error) {
@@ -12,6 +17,10 @@ function mapError(error) {
 
   if (error instanceof NotFoundError) {
     return { status: 404, body: { error: error.message } };
+  }
+
+  if (error instanceof ConflictError) {
+    return { status: 409, body: { error: error.message } };
   }
 
   return { status: 500, body: { error: "Internal server error." } };

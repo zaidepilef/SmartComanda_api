@@ -12,10 +12,9 @@ import {
 const router = Router();
 
 router.use(authRequired);
-router.use(requireManager);
 
 router.get("/", validateQuery(listDishesQuerySchema), dishController.listDishes);
-router.post("/", validateBody(createDishSchema), dishController.createDish);
-router.put("/:id", validateBody(updateDishSchema), dishController.updateDish);
+router.post("/", requireManager, validateBody(createDishSchema), dishController.createDish);
+router.put("/:id", requireManager, validateBody(updateDishSchema), dishController.updateDish);
 
 export default router;

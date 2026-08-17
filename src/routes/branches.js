@@ -12,11 +12,10 @@ import {
 const router = Router();
 
 router.use(authRequired);
-router.use(requireManager);
 
 router.get("/", validateQuery(listBranchesQuerySchema), branchController.listBranches);
-router.post("/", validateBody(createBranchSchema), branchController.createBranch);
-router.put("/:id", validateBody(updateBranchSchema), branchController.updateBranch);
-router.get("/:id", branchController.getBranch);
+router.post("/", requireManager, validateBody(createBranchSchema), branchController.createBranch);
+router.put("/:id", requireManager, validateBody(updateBranchSchema), branchController.updateBranch);
+router.get("/:id", requireManager, branchController.getBranch);
 
 export default router;

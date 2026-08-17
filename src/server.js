@@ -13,6 +13,7 @@ import ingredientsRouter from "./routes/ingredients.js";
 import dishesRouter from "./routes/dishes.js";
 import inventoryRouter from "./routes/inventory.js";
 import ordersRouter from "./routes/orders.js";
+import cashSessionsRouter from "./routes/cash-sessions.js";
 import swaggerSpec from "./config/swagger.js";
 
 const app = express();
@@ -36,6 +37,7 @@ app.use("/api/ingredients", ingredientsRouter);
 app.use("/api/dishes", dishesRouter);
 app.use("/api/inventory", inventoryRouter);
 app.use("/api/orders", ordersRouter);
+app.use("/api/cash-sessions", cashSessionsRouter);
 
 if (env.enableApiDocs) {
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));

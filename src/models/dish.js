@@ -18,6 +18,9 @@ export function toDishDocument(dish) {
     document.description = dish.description;
   }
 
+  document.category = dish.category ?? "general";
+  document.icon = dish.icon ?? "🍽️";
+
   if (dish.branchPrices !== undefined) {
     document.branchPrices = dish.branchPrices;
   }

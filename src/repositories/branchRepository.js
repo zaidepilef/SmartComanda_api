@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { getMongoClient } from "../db/mongo.js";
 import { NotFoundError } from "../utils/errors.js";
+import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 
 const BRANCHES_COLLECTION = "branches";
 
@@ -21,7 +22,11 @@ function escapeRegex(text) {
 }
 
 export async function createBranch(branch) {
-  const document = { ...branch, tenantId: toTenantObjectId(branch.tenantId) };
+  const document = {
+    ...branch,
+    paymentMethods: branch.paymentMethods ?? PAYMENT_METHODS,
+    tenantId: toTenantObjectId(branch.tenantId),
+  };
   const result = await getBranchesCollection().insertOne({
     ...document,
     createdAt: new Date(),
@@ -84,4 +89,20 @@ export async function findBranchById(id) {
   }
 
   return getBranchesCollection().findOne({ _id: objectId });
+}
+
+export async function nextOrderNumber(branchId) {
+  const objectId = toBranchObjectId(branchId);
+
+  if (!objectId) {
+    return null;
+  }
+
+  const result = await getBranchesCollection().findOneAndUpdate(
+    { _id: objectId },
+    { $inc: { nextOrderNumber: 1 } },
+    { returnDocument: "after" }
+  );
+
+  return result?.nextOrderNumber ?? null;
 }

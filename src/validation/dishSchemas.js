@@ -22,6 +22,8 @@ export const createDishSchema = z.object({
   recipe: z.array(recipeLineSchema).min(1, "recipe must have at least one ingredient."),
   active: z.boolean().default(true),
   description: z.string().trim().min(1).optional(),
+  category: z.string().trim().min(1).optional(),
+  icon: z.string().trim().min(1).optional(),
   branchPrices: z.array(branchPriceSchema).optional(),
 });
 
@@ -32,6 +34,8 @@ export const updateDishSchema = z
     recipe: z.array(recipeLineSchema).min(1, "recipe must have at least one ingredient.").optional(),
     active: z.boolean().optional(),
     description: z.string().trim().min(1).optional(),
+    category: z.string().trim().min(1).optional(),
+    icon: z.string().trim().min(1).optional(),
     branchPrices: z.array(branchPriceSchema).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {

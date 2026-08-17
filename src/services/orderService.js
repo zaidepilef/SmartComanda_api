@@ -1,13 +1,20 @@
 import * as dishRepository from "../repositories/dishRepository.js";
 import * as branchRepository from "../repositories/branchRepository.js";
+import * as cashSessionRepository from "../repositories/cashSessionRepository.js";
 import * as ingredientRepository from "../repositories/ingredientRepository.js";
 import * as movementRepository from "../repositories/movementRepository.js";
 import * as orderRepository from "../repositories/orderRepository.js";
 import * as stockRepository from "../repositories/stockRepository.js";
 import * as inventoryService from "./inventoryService.js";
 import * as fifoService from "./fifoService.js";
-import { BadRequestError, ForbiddenError, NotFoundError } from "../utils/errors.js";
+import {
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../utils/errors.js";
 import { isGlobalActor } from "../utils/tenantScope.js";
+import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 
 const ROUND_SCALE = 4;
 
@@ -58,6 +65,29 @@ export async function createOrder(actor, orderInput) {
   const branch = await assertBranchAccess(actor, orderInput.foodtruckId);
   const tenantId = isGlobalActor(actor) ? branch.tenantId : actor.tenantId;
 
+  const paymentMethod = orderInput.paymentMethod;
+  const branchPaymentMethods = branch.paymentMethods ?? PAYMENT_METHODS;
+
+  if (paymentMethod !== undefined && !branchPaymentMethods.includes(paymentMethod)) {
+    throw new BadRequestError("Payment method not supported by this branch.");
+  }
+
+  let openSession = null;
+
+  if (paymentMethod !== undefined) {
+    openSession = await cashSessionRepository.findOpenByBranch(branch._id, tenantId);
+
+    if (!openSession) {
+      throw new ConflictError("No open cash session for this branch.");
+    }
+  }
+
+  const number = await branchRepository.nextOrderNumber(branch._id);
+
+  if (number === null) {
+    throw new NotFoundError("Branch not found.");
+  }
+
   const dishIds = orderInput.items.map((item) => item.dishId);
   const dishes = await dishRepository.findDishesByIds(dishIds, { tenantId });
 
@@ -89,7 +119,22 @@ export async function createOrder(actor, orderInput) {
     };
   });
 
-  const order = await createOrderDocument(tenantId, branch, orderInput, items, round(total));
+  const order = await createOrderDocument(tenantId, branch, orderInput, items, round(total), number);
+
+  if (paymentMethod !== undefined) {
+    const updated = await cashSessionRepository.incrementTotals(
+      branch._id,
+      tenantId,
+      paymentMethod,
+      round(total)
+    );
+
+    if (!updated) {
+      console.warn(
+        `Cash session for branch ${branch._id} closed before order ${order._id} could be recorded.`
+      );
+    }
+  }
 
   const pool = await inventoryService.resolveStockPool(actor, branch._id, tenantId);
   let stockRequested = false;
@@ -253,11 +298,17 @@ async function tryDeductDishStock(pool, dish, quantity, tenantId, actor, orderId
   return { applied: true, missing: [] };
 }
 
-async function createOrderDocument(tenantId, branch, orderInput, items, total) {
+async function createOrderDocument(tenantId, branch, orderInput, items, total, number) {
+  const paymentMethod = orderInput.paymentMethod;
+
   return orderRepository.createOrder({
     tenantId,
     foodtruckId: branch._id,
     status: "pending",
+    number,
+    orderType: orderInput.orderType ?? "takeaway",
+    paymentStatus: paymentMethod !== undefined ? "paid" : "pending",
+    paymentMethod,
     clientContact: orderInput.clientContact,
     items,
     total: round(total),
