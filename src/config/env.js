@@ -33,4 +33,8 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
   turnstileSecretKey: TURNSTILE_SECRET_KEY,
   sysadminEmail: SYSADMIN_EMAIL,
+  enableApiDocs:
+    process.env.ENABLE_API_DOCS !== undefined
+      ? process.env.ENABLE_API_DOCS === "true"
+      : process.env.NODE_ENV !== "production",
 };

@@ -8,6 +8,11 @@ const recipeLineSchema = z.object({
   unit: z.string().trim().min(1, "unit is required."),
 });
 
+const branchPriceSchema = z.object({
+  branchId: z.string().regex(OBJECT_ID_PATTERN, "branchId must be a valid ObjectId."),
+  price: z.number().nonnegative("price must be zero or greater."),
+});
+
 export const createDishSchema = z.object({
   tenantId: z
     .string()
@@ -17,6 +22,7 @@ export const createDishSchema = z.object({
   recipe: z.array(recipeLineSchema).min(1, "recipe must have at least one ingredient."),
   active: z.boolean().default(true),
   description: z.string().trim().min(1).optional(),
+  branchPrices: z.array(branchPriceSchema).optional(),
 });
 
 export const updateDishSchema = z
@@ -26,6 +32,7 @@ export const updateDishSchema = z
     recipe: z.array(recipeLineSchema).min(1, "recipe must have at least one ingredient.").optional(),
     active: z.boolean().optional(),
     description: z.string().trim().min(1).optional(),
+    branchPrices: z.array(branchPriceSchema).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "At least one field must be provided.",
@@ -38,4 +45,8 @@ export const listDishesQuerySchema = z.object({
     .optional(),
   active: z.enum(["true", "false"]).optional(),
   q: z.string().trim().min(1).optional(),
+  branchId: z
+    .string()
+    .regex(OBJECT_ID_PATTERN, "branchId must be a valid ObjectId.")
+    .optional(),
 });

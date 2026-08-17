@@ -30,6 +30,22 @@ export async function createMovement(movement) {
     document.branchId = toObjectId(movement.branchId);
   }
 
+  if (movement.unitCost !== undefined && movement.unitCost !== null) {
+    document.unitCost = movement.unitCost;
+  }
+
+  if (movement.batchId) {
+    document.batchId = toObjectId(movement.batchId);
+  }
+
+  if (movement.batches !== undefined && movement.batches !== null) {
+    document.batches = movement.batches.map((entry) => ({
+      batchId: toObjectId(entry.batchId),
+      quantity: entry.quantity,
+      unitCost: entry.unitCost,
+    }));
+  }
+
   if (movement.orderId) {
     document.orderId = toObjectId(movement.orderId);
   }

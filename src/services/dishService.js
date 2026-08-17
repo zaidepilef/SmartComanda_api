@@ -1,6 +1,8 @@
 import { ObjectId } from "mongodb";
 import * as dishRepository from "../repositories/dishRepository.js";
 import * as ingredientRepository from "../repositories/ingredientRepository.js";
+import * as stockRepository from "../repositories/stockRepository.js";
+import * as fifoService from "./fifoService.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { getTenantFilter, isGlobalActor } from "../utils/tenantScope.js";
 
@@ -10,13 +12,17 @@ function toRecipeLine(line) {
   return { ...line, ingredientId: new ObjectId(line.ingredientId) };
 }
 
+function toBranchPrice(entry) {
+  return { ...entry, branchId: new ObjectId(entry.branchId) };
+}
+
 function assertCanManage(actor) {
   if (!MANAGER_ROLES.includes(actor?.role)) {
     throw new ForbiddenError("Forbidden. Owner or admin role required.");
   }
 }
 
-export async function computeDishCost(recipe, { tenantId } = {}) {
+export async function computeDishCostPerBranch(recipe, { tenantId, branchId }) {
   const ingredientIds = recipe.map((line) => line.ingredientId);
   const ingredients = await ingredientRepository.findIngredientsByIds(ingredientIds, { tenantId });
 
@@ -39,7 +45,13 @@ export async function computeDishCost(recipe, { tenantId } = {}) {
       );
     }
 
-    cost += line.quantity * ingredient.unitCost;
+    const batches = await stockRepository.listBatches({
+      tenantId,
+      branchId,
+      ingredientId: ingredient._id,
+    });
+
+    cost += fifoService.computeFifoCost(batches, line.quantity, ingredient.unitCost ?? 0);
   }
 
   return cost;
@@ -71,7 +83,7 @@ function assertCanAssignTenant(actor, tenantId) {
   }
 }
 
-export async function listDishes(actor, { tenantId, active, q } = {}) {
+export async function listDishes(actor, { tenantId, active, q, branchId } = {}) {
   const filter = getTenantFilter(actor);
 
   if (tenantId !== undefined && isGlobalActor(actor)) {
@@ -85,7 +97,22 @@ export async function listDishes(actor, { tenantId, active, q } = {}) {
   const normalizedActive =
     active === undefined ? undefined : active === true || active === "true";
 
-  return dishRepository.listDishes({ ...filter, active: normalizedActive });
+  const dishes = await dishRepository.listDishes({ ...filter, active: normalizedActive });
+
+  if (branchId === undefined) {
+    return dishes;
+  }
+
+  const resolvedTenantId = isGlobalActor(actor) ? filter.tenantId : actor.tenantId;
+
+  for (const dish of dishes) {
+    dish.cost = await computeDishCostPerBranch(dish.recipe, {
+      tenantId: resolvedTenantId,
+      branchId,
+    });
+  }
+
+  return dishes;
 }
 
 export async function createDish(actor, dishInput) {
@@ -100,15 +127,15 @@ export async function createDish(actor, dishInput) {
 
   await assertNameAvailable(dishInput.name, tenantId);
 
-  const computedCost = await computeDishCost(dishInput.recipe, { tenantId });
-
   return dishRepository.createDish({
     name: dishInput.name,
     salePrice: dishInput.salePrice,
     active: dishInput.active,
     description: dishInput.description,
-    computedCost,
     recipe: dishInput.recipe.map(toRecipeLine),
+    ...(dishInput.branchPrices !== undefined
+      ? { branchPrices: dishInput.branchPrices.map(toBranchPrice) }
+      : {}),
     tenantId,
   });
 }
@@ -127,21 +154,16 @@ export async function updateDishById(actor, id, dishInput) {
   await assertNameAvailable(nextName, dish.tenantId, id);
 
   const nextRecipe = dishInput.recipe ?? dish.recipe;
-  const computedCost = await computeDishCost(nextRecipe, { tenantId: dish.tenantId });
 
-  const update =
-    dishInput.recipe !== undefined
-      ? { ...dishInput, recipe: nextRecipe.map(toRecipeLine), computedCost }
-      : { ...dishInput, computedCost };
+  const update = { ...dishInput };
+
+  if (dishInput.recipe !== undefined) {
+    update.recipe = nextRecipe.map(toRecipeLine);
+  }
+
+  if (dishInput.branchPrices !== undefined) {
+    update.branchPrices = dishInput.branchPrices.map(toBranchPrice);
+  }
 
   return dishRepository.updateDish(id, update);
-}
-
-export async function recomputeDishesCostForIngredient(ingredientId) {
-  const dishes = await dishRepository.findDishesByIngredientId(ingredientId);
-
-  for (const dish of dishes) {
-    const computedCost = await computeDishCost(dish.recipe, { tenantId: dish.tenantId });
-    await dishRepository.updateDish(dish._id, { computedCost });
-  }
 }

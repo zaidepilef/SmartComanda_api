@@ -12,7 +12,7 @@ export const createIngredientSchema = z.object({
   dimension: z.enum(INGREDIENT_DIMENSIONS_LIST, {
     message: "dimension must be count, mass, or volume.",
   }),
-  unitCost: z.number().nonnegative("unitCost must be zero or greater."),
+  unitCost: z.number().nonnegative("unitCost must be zero or greater.").optional(),
   notes: z.string().trim().min(1).optional(),
 });
 

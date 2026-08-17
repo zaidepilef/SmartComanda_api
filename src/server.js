@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env.js";
 import { connectMongo, closeMongo, getMongoClient } from "./db/mongo.js";
 import { runMigrations } from "./db/migrations.js";
@@ -12,6 +13,7 @@ import ingredientsRouter from "./routes/ingredients.js";
 import dishesRouter from "./routes/dishes.js";
 import inventoryRouter from "./routes/inventory.js";
 import ordersRouter from "./routes/orders.js";
+import swaggerSpec from "./config/swagger.js";
 
 const app = express();
 
@@ -34,6 +36,13 @@ app.use("/api/ingredients", ingredientsRouter);
 app.use("/api/dishes", dishesRouter);
 app.use("/api/inventory", inventoryRouter);
 app.use("/api/orders", ordersRouter);
+
+if (env.enableApiDocs) {
+  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  app.get("/api/docs.json", (req, res) => {
+    res.json(swaggerSpec);
+  });
+}
 
 async function start() {
   try {

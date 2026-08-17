@@ -22,6 +22,41 @@ function handleError(res, error) {
   return res.status(status).json(body);
 }
 
+/**
+ * @swagger
+ * /api/orders:
+ *   post:
+ *     summary: Crear un pedido
+ *     description: Crea un nuevo pedido con uno o más platos.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/OrderRequest'
+ *     responses:
+ *       201:
+ *         description: Pedido creado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Order'
+ *       400:
+ *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       401:
+ *         description: Token ausente o inválido
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
 export async function createOrder(req, res) {
   try {
     const result = await orderService.createOrder(req.user, req.body);

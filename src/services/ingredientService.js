@@ -1,6 +1,5 @@
 import * as ingredientRepository from "../repositories/ingredientRepository.js";
 import * as dishRepository from "../repositories/dishRepository.js";
-import * as dishService from "./dishService.js";
 import { ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { getTenantFilter, isGlobalActor } from "../utils/tenantScope.js";
 
@@ -96,14 +95,7 @@ export async function updateIngredientById(actor, id, ingredientInput) {
     }
   }
 
-  const costChanged =
-    ingredientInput.unitCost !== undefined && ingredientInput.unitCost !== ingredient.unitCost;
-
   const updated = await ingredientRepository.updateIngredient(id, ingredientInput);
-
-  if (costChanged) {
-    await dishService.recomputeDishesCostForIngredient(id);
-  }
 
   return updated;
 }

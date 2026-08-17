@@ -4,7 +4,6 @@ export function toDishDocument(dish) {
   const document = {
     name: dish.name,
     salePrice: dish.salePrice,
-    computedCost: dish.computedCost,
     recipe: dish.recipe,
     tenantId: dish.tenantId,
     createdAt: now,
@@ -17,6 +16,10 @@ export function toDishDocument(dish) {
 
   if (dish.description !== undefined) {
     document.description = dish.description;
+  }
+
+  if (dish.branchPrices !== undefined) {
+    document.branchPrices = dish.branchPrices;
   }
 
   return document;

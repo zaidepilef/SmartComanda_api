@@ -15,35 +15,22 @@ export function toStockObjectId(id) {
   return ObjectId.isValid(id) ? new ObjectId(id) : null;
 }
 
-function resolveNullableBranch(branchId) {
-  if (branchId === null || branchId === undefined) {
-    return null;
-  }
-  return toObjectId(branchId);
-}
-
-export function stockPoolFilter({ tenantId, ingredientId, branchId }) {
-  const filter = {
+export async function createBatch({ tenantId, branchId, ingredientId, quantity, unitCost }) {
+  const document = {
     tenantId: toObjectId(tenantId),
+    branchId: toObjectId(branchId),
     ingredientId: toObjectId(ingredientId),
+    quantity,
+    unitCost,
+    createdAt: new Date(),
+    updatedAt: new Date(),
   };
 
-  const resolvedBranchId = resolveNullableBranch(branchId);
-
-  if (resolvedBranchId === null) {
-    filter.branchId = null;
-  } else {
-    filter.branchId = resolvedBranchId;
-  }
-
-  return filter;
+  const result = await getStocksCollection().insertOne(document);
+  return { ...document, _id: result.insertedId };
 }
 
-export async function findStock(pool) {
-  return getStocksCollection().findOne(stockPoolFilter(pool));
-}
-
-export async function listStocks({ tenantId, branchId } = {}) {
+export async function listBatches({ tenantId, branchId, ingredientId } = {}) {
   const filter = {};
 
   if (tenantId !== undefined) {
@@ -51,39 +38,32 @@ export async function listStocks({ tenantId, branchId } = {}) {
   }
 
   if (branchId !== undefined) {
-    const resolvedBranchId = resolveNullableBranch(branchId);
-
-    if (resolvedBranchId === null) {
-      filter.branchId = null;
-    } else {
-      filter.branchId = resolvedBranchId;
-    }
+    filter.branchId = toObjectId(branchId);
   }
 
-  return getStocksCollection().find(filter).toArray();
+  if (ingredientId !== undefined) {
+    filter.ingredientId = toObjectId(ingredientId);
+  }
+
+  return getStocksCollection().find(filter).sort({ createdAt: 1 }).toArray();
 }
 
-export async function adjustStock(pool, quantityChange) {
-  const filter = stockPoolFilter(pool);
+export async function updateBatchQuantity(batchId, quantity, { session } = {}) {
+  const objectId = toStockObjectId(batchId);
 
-  const document = {
-    $set: {
-      tenantId: toObjectId(pool.tenantId),
-      ingredientId: toObjectId(pool.ingredientId),
-      ...(filter.branchId === null ? {} : { branchId: filter.branchId }),
-      updatedAt: new Date(),
-    },
-    $inc: { quantity: quantityChange },
-    $setOnInsert: { createdAt: new Date() },
-  };
+  if (!objectId) {
+    return null;
+  }
+
+  const options = session ? { session } : {};
+
+  if (quantity <= 0) {
+    return getStocksCollection().findOneAndDelete({ _id: objectId }, options);
+  }
 
   return getStocksCollection().findOneAndUpdate(
-    filter,
-    document,
-    { upsert: true, returnDocument: "after" }
+    { _id: objectId },
+    { $set: { quantity, updatedAt: new Date() } },
+    { ...options, returnDocument: "after" }
   );
-}
-
-export async function countStocksForTenant(tenantId) {
-  return getStocksCollection().countDocuments({ tenantId: toObjectId(tenantId) });
 }

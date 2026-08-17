@@ -3,8 +3,9 @@ import * as branchRepository from "../repositories/branchRepository.js";
 import * as ingredientRepository from "../repositories/ingredientRepository.js";
 import * as movementRepository from "../repositories/movementRepository.js";
 import * as orderRepository from "../repositories/orderRepository.js";
-import * as inventoryService from "./inventoryService.js";
 import * as stockRepository from "../repositories/stockRepository.js";
+import * as inventoryService from "./inventoryService.js";
+import * as fifoService from "./fifoService.js";
 import { BadRequestError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { isGlobalActor } from "../utils/tenantScope.js";
 
@@ -12,6 +13,23 @@ const ROUND_SCALE = 4;
 
 function round(value) {
   return Math.round(value * 10 ** ROUND_SCALE) / 10 ** ROUND_SCALE;
+}
+
+class InsufficientStockError extends Error {
+  constructor(ingredientId, ingredientName, available, needed) {
+    super("Insufficient stock.");
+    this.ingredientId = ingredientId;
+    this.ingredientName = ingredientName;
+    this.available = available;
+    this.needed = needed;
+  }
+}
+
+function resolveDishPrice(dish, branchId) {
+  const override = (dish.branchPrices ?? []).find(
+    (entry) => String(entry.branchId) === String(branchId)
+  );
+  return override ? override.price : dish.salePrice;
 }
 
 async function assertBranchAccess(actor, branchId) {
@@ -51,48 +69,70 @@ export async function createOrder(actor, orderInput) {
   const warnings = [];
   let total = 0;
 
-  const items = [];
-
-  for (let index = 0; index < orderInput.items.length; index += 1) {
-    const item = orderInput.items[index];
+  const items = orderInput.items.map((item, index) => {
     const dish = dishesById.get(String(item.dishId));
 
     if (!dish) {
       throw new BadRequestError(`Item ${index + 1} references a dish outside your tenant.`);
     }
 
-    const snapshot = {
+    const price = resolveDishPrice(dish, branch._id);
+
+    total += price * item.quantity;
+
+    return {
       dishId: dish._id,
       name: dish.name,
-      price: dish.salePrice,
+      price,
       quantity: item.quantity,
       stockApplied: false,
     };
+  });
 
-    total += dish.salePrice * item.quantity;
+  const order = await createOrderDocument(tenantId, branch, orderInput, items, round(total));
 
-    if (item.stockApplied) {
-      const pool = await inventoryService.resolveStockPool(actor, branch._id, tenantId);
-      const deductionResult = await tryDeductDishStock(pool, dish, item.quantity, tenantId, actor);
-      snapshot.stockApplied = deductionResult.applied;
+  const pool = await inventoryService.resolveStockPool(actor, branch._id, tenantId);
+  let stockRequested = false;
 
-      if (!deductionResult.applied) {
-        warnings.push({
-          itemIndex: index,
-          dishId: dish._id,
-          dishName: dish.name,
-          missing: deductionResult.missing,
-        });
-      }
+  for (let index = 0; index < orderInput.items.length; index += 1) {
+    const item = orderInput.items[index];
+
+    if (!item.stockApplied) {
+      continue;
     }
 
-    items.push(snapshot);
+    stockRequested = true;
+
+    const dish = dishesById.get(String(item.dishId));
+    const deductionResult = await tryDeductDishStock(
+      pool,
+      dish,
+      item.quantity,
+      tenantId,
+      actor,
+      order._id
+    );
+
+    items[index].stockApplied = deductionResult.applied;
+
+    if (!deductionResult.applied) {
+      warnings.push({
+        itemIndex: index,
+        dishId: dish._id,
+        dishName: dish.name,
+        missing: deductionResult.missing,
+      });
+    }
   }
 
-  return { order: await createOrderDocument(tenantId, branch, orderInput, items, total), warnings };
+  if (stockRequested) {
+    await orderRepository.updateOrderItems(order._id, items);
+  }
+
+  return { order: { ...order, items }, warnings };
 }
 
-async function tryDeductDishStock(pool, dish, quantity, tenantId, actor) {
+async function tryDeductDishStock(pool, dish, quantity, tenantId, actor, orderId) {
   const ingredientIds = dish.recipe.map((line) => line.ingredientId);
   const ingredients = await ingredientRepository.findIngredientsByIds(ingredientIds, {
     tenantId,
@@ -118,13 +158,13 @@ async function tryDeductDishStock(pool, dish, quantity, tenantId, actor) {
   const missing = [];
 
   for (const { ingredient, needed } of required) {
-    const stock = await stockRepository.findStock({
+    const batches = await stockRepository.listBatches({
       tenantId: pool.tenantId,
-      ingredientId: ingredient._id,
       branchId: pool.branchId,
+      ingredientId: ingredient._id,
     });
 
-    const available = stock?.quantity ?? 0;
+    const available = batches.reduce((acc, batch) => acc + (batch.quantity ?? 0), 0);
 
     if (available + 1e-9 < needed) {
       missing.push({
@@ -140,19 +180,72 @@ async function tryDeductDishStock(pool, dish, quantity, tenantId, actor) {
     return { applied: false, missing };
   }
 
-  for (const { ingredient, needed } of required) {
-    await stockRepository.adjustStock(
-      { ...pool, ingredientId: ingredient._id },
-      -needed
-    );
+  const consumeAll = async (session) => {
+    const deductions = [];
 
+    for (const { ingredient, needed } of required) {
+      const result = await fifoService.consumeFifo(
+        {
+          tenantId: pool.tenantId,
+          branchId: pool.branchId,
+          ingredientId: ingredient._id,
+          quantity: needed,
+        },
+        { session }
+      );
+
+      if (!result.applied) {
+        throw new InsufficientStockError(
+          String(ingredient._id),
+          ingredient.name,
+          result.available,
+          round(needed)
+        );
+      }
+
+      deductions.push({ ingredient, needed, result });
+    }
+
+    return deductions;
+  };
+
+  let deductions;
+
+  const outcome = await fifoService.withWriteTransaction(consumeAll);
+
+  if (outcome.transactionUnsupported) {
+    try {
+      deductions = await consumeAll(null);
+    } catch (error) {
+      if (error instanceof InsufficientStockError) {
+        return {
+          applied: false,
+          missing: [
+            {
+              ingredientId: error.ingredientId,
+              ingredientName: error.ingredientName,
+              available: error.available,
+              needed: error.needed,
+            },
+          ],
+        };
+      }
+      throw error;
+    }
+  } else {
+    deductions = outcome;
+  }
+
+  for (const { ingredient, needed, result } of deductions) {
     await movementRepository.createMovement({
       tenantId: pool.tenantId,
       ingredientId: ingredient._id,
       branchId: pool.branchId,
       quantity: round(-needed),
+      batches: result.breakdown,
       type: "sale",
       reason: `Venta: ${dish.name}`,
+      orderId,
       createdBy: actor._id,
     });
   }
