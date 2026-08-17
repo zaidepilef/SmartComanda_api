@@ -75,6 +75,15 @@ export async function createOrder(req, res) {
   }
 }
 
+export async function payOrder(req, res) {
+  try {
+    const result = await orderService.payOrder(req.user, req.params.id, req.body.paymentMethod);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
 export async function listOrders(req, res) {
   try {
     const orders = await orderService.listOrders(req.user, req.validatedQuery);

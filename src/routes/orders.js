@@ -10,6 +10,8 @@ import { createOrderSchema } from "../validation/orderSchemas.js";
 import {
   getOrderParamsSchema,
   listOrdersQuerySchema,
+  payOrderParamsSchema,
+  payOrderSchema,
   updateOrderStatusParamsSchema,
   updateOrderStatusSchema,
 } from "../validation/orderQuerySchemas.js";
@@ -26,6 +28,12 @@ router.patch(
   validateParams(updateOrderStatusParamsSchema),
   validateBody(updateOrderStatusSchema),
   orderController.updateOrderStatus
+);
+router.patch(
+  "/:id/pay",
+  validateParams(payOrderParamsSchema),
+  validateBody(payOrderSchema),
+  orderController.payOrder
 );
 
 export default router;

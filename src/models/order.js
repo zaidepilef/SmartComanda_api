@@ -57,6 +57,14 @@ export function toOrderDocument(order) {
     document.paymentMethod = order.paymentMethod;
   }
 
+  if (order.clientPhone !== undefined) {
+    document.clientPhone = order.clientPhone;
+  }
+
+  if (order.pointsAwarded !== undefined) {
+    document.pointsAwarded = order.pointsAwarded;
+  }
+
   if (order.statusHistory !== undefined) {
     document.statusHistory = order.statusHistory;
   }

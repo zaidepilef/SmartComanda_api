@@ -41,10 +41,23 @@ export async function updateTenant(id, update) {
     throw new NotFoundError("Tenant not found.");
   }
 
+  const set = { ...update, updatedAt: new Date() };
+  const unset = {};
+
+  if (update.loyalty === null) {
+    delete set.loyalty;
+    unset.loyalty = "";
+  }
+
+  const operation = {
+    $set: set,
+    ...(Object.keys(unset).length > 0 ? { $unset: unset } : {}),
+  };
+
   try {
     const result = await getTenantsCollection().findOneAndUpdate(
       { _id: objectId },
-      { $set: { ...update, updatedAt: new Date() } },
+      operation,
       { returnDocument: "after" }
     );
 

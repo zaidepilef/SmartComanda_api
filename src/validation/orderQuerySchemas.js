@@ -50,3 +50,13 @@ export const updateOrderStatusSchema = z.object({
 export const updateOrderStatusParamsSchema = z.object({
   id: z.string().regex(OBJECT_ID_PATTERN, "id must be a valid ObjectId."),
 });
+
+export const payOrderParamsSchema = z.object({
+  id: z.string().regex(OBJECT_ID_PATTERN, "id must be a valid ObjectId."),
+});
+
+export const payOrderSchema = z.object({
+  paymentMethod: z.enum(PAYMENT_METHODS, {
+    message: "paymentMethod must be one of the payment methods.",
+  }),
+});

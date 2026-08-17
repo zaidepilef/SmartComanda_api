@@ -7,6 +7,7 @@ import * as orderRepository from "../repositories/orderRepository.js";
 import * as stockRepository from "../repositories/stockRepository.js";
 import * as inventoryService from "./inventoryService.js";
 import * as fifoService from "./fifoService.js";
+import * as loyaltyService from "./loyaltyService.js";
 import {
   ORDER_STATUSES,
   ORDER_STATUS_TRANSITIONS,
@@ -151,6 +152,58 @@ export async function updateOrderStatus(actor, orderId, status) {
   return updated;
 }
 
+export async function payOrder(actor, orderId, paymentMethod) {
+  const order = await getOrder(actor, orderId);
+
+  if (order.paymentStatus !== "pending") {
+    throw new ConflictError("Only pending orders can be paid.");
+  }
+
+  const branch = await branchRepository.findBranchById(order.foodtruckId);
+
+  if (!branch) {
+    throw new NotFoundError("Branch not found.");
+  }
+
+  const branchPaymentMethods = branch.paymentMethods ?? PAYMENT_METHODS;
+
+  if (!branchPaymentMethods.includes(paymentMethod)) {
+    throw new BadRequestError("Payment method not supported by this branch.");
+  }
+
+  const openSession = await cashSessionRepository.findOpenByBranch(branch._id, order.tenantId);
+
+  if (!openSession) {
+    throw new ConflictError("No open cash session for this branch.");
+  }
+
+  const paid = await orderRepository.payOrder(orderId, paymentMethod);
+
+  if (!paid) {
+    throw new ConflictError("Order is not pending.");
+  }
+
+  await cashSessionRepository.incrementTotals(
+    branch._id,
+    order.tenantId,
+    paymentMethod,
+    round(paid.total)
+  );
+
+  const pointsEarned = await loyaltyService.awardForOrder(paid, {
+    tenantId: order.tenantId,
+    branchId: branch._id,
+  });
+
+  const result = { order: paid };
+
+  if (pointsEarned !== null) {
+    result.pointsEarned = pointsEarned;
+  }
+
+  return result;
+}
+
 export async function createOrder(actor, orderInput) {
   assertTenantActor(actor);
 
@@ -213,7 +266,14 @@ export async function createOrder(actor, orderInput) {
 
   const order = await createOrderDocument(tenantId, branch, orderInput, items, round(total), number);
 
+  let pointsEarned = null;
+
   if (paymentMethod !== undefined) {
+    pointsEarned = await loyaltyService.awardForOrder(order, {
+      tenantId,
+      branchId: branch._id,
+    });
+
     const updated = await cashSessionRepository.incrementTotals(
       branch._id,
       tenantId,
@@ -266,7 +326,13 @@ export async function createOrder(actor, orderInput) {
     await orderRepository.updateOrderItems(order._id, items);
   }
 
-  return { order: { ...order, items }, warnings };
+  const result = { order: { ...order, items }, warnings };
+
+  if (pointsEarned !== null) {
+    result.pointsEarned = pointsEarned;
+  }
+
+  return result;
 }
 
 async function tryDeductDishStock(pool, dish, quantity, tenantId, actor, orderId) {

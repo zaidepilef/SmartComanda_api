@@ -70,6 +70,15 @@ export async function listTenants(req, res) {
   }
 }
 
+export async function getTenant(req, res) {
+  try {
+    const tenant = await tenantService.getTenantById(req.params.id, req.user);
+    return res.json(tenant);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
 /**
  * @swagger
  * /api/tenants:
@@ -186,7 +195,7 @@ export async function createTenant(req, res) {
  */
 export async function updateTenant(req, res) {
   try {
-    const tenant = await tenantService.updateTenantById(req.params.id, req.body);
+    const tenant = await tenantService.updateTenantById(req.params.id, req.body, req.user);
     return res.json(tenant);
   } catch (error) {
     return handleError(res, error);

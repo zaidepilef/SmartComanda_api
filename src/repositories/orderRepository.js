@@ -150,3 +150,17 @@ export async function updateOrderItems(orderId, items) {
 
   return result;
 }
+
+export async function payOrder(orderId, paymentMethod) {
+  const objectId = toOrderObjectId(orderId);
+
+  if (!objectId) {
+    return null;
+  }
+
+  return getOrdersCollection().findOneAndUpdate(
+    { _id: objectId, paymentStatus: "pending" },
+    { $set: { paymentStatus: "paid", paymentMethod, updatedAt: new Date() } },
+    { returnDocument: "after" }
+  );
+}
