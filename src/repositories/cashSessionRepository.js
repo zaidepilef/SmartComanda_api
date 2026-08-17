@@ -36,6 +36,45 @@ export async function findOpenByBranch(branchId, tenantId) {
   });
 }
 
+export async function findSessionById(sessionId, tenantId) {
+  const objectId = toCashSessionObjectId(sessionId);
+
+  if (!objectId) {
+    return null;
+  }
+
+  const filter = { _id: objectId };
+
+  if (tenantId !== undefined) {
+    filter.tenantId = toTenantObjectId(tenantId);
+  }
+
+  return getCashSessionsCollection().findOne(filter);
+}
+
+export async function closeSession(sessionId, tenantId, patch) {
+  const objectId = toCashSessionObjectId(sessionId);
+
+  if (!objectId) {
+    return null;
+  }
+
+  const filter = {
+    _id: objectId,
+    status: CASH_SESSION_STATUSES.OPEN,
+  };
+
+  if (tenantId !== undefined) {
+    filter.tenantId = toTenantObjectId(tenantId);
+  }
+
+  return getCashSessionsCollection().findOneAndUpdate(
+    filter,
+    { $set: { ...patch, status: CASH_SESSION_STATUSES.CLOSED, updatedAt: new Date() } },
+    { returnDocument: "after" }
+  );
+}
+
 export async function incrementTotals(branchId, tenantId, method, total) {
   const objectId = toCashSessionObjectId(branchId);
 

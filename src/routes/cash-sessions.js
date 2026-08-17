@@ -1,8 +1,10 @@
 import { Router } from "express";
 import * as cashSessionController from "../controllers/cashSessionController.js";
 import authRequired from "../middleware/authRequired.js";
-import { validateBody, validateQuery } from "../middleware/validation.js";
+import { validateBody, validateParams, validateQuery } from "../middleware/validation.js";
 import {
+  closeCashSessionParamsSchema,
+  closeCashSessionSchema,
   currentCashSessionQuerySchema,
   openCashSessionSchema,
 } from "../validation/cashSessionSchemas.js";
@@ -20,6 +22,12 @@ router.get(
   "/current",
   validateQuery(currentCashSessionQuerySchema),
   cashSessionController.getCurrentCashSession
+);
+router.post(
+  "/:id/close",
+  validateParams(closeCashSessionParamsSchema),
+  validateBody(closeCashSessionSchema),
+  cashSessionController.closeCashSession
 );
 
 export default router;

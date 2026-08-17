@@ -8,6 +8,10 @@ import * as stockRepository from "../repositories/stockRepository.js";
 import * as inventoryService from "./inventoryService.js";
 import * as fifoService from "./fifoService.js";
 import {
+  ORDER_STATUSES,
+  ORDER_STATUS_TRANSITIONS,
+} from "../models/order.js";
+import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
@@ -57,6 +61,94 @@ function assertTenantActor(actor) {
   if (!actor?.tenantId && !isGlobalActor(actor)) {
     throw new ForbiddenError("Forbidden. A tenant is required.");
   }
+}
+
+async function assertOrderAccess(actor, order) {
+  const orderTenantId = String(order.tenantId);
+  const actorTenantId = actor.tenantId ? String(actor.tenantId) : null;
+
+  if (isGlobalActor(actor)) {
+    return;
+  }
+
+  if (actorTenantId !== orderTenantId) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  if (actor.role === "cashier" && actor.branchId) {
+    if (String(order.foodtruckId) !== String(actor.branchId)) {
+      throw new NotFoundError("Order not found.");
+    }
+  }
+}
+
+export async function listOrders(actor, query = {}) {
+  assertTenantActor(actor);
+
+  const tenantId = isGlobalActor(actor) ? query.tenantId : actor.tenantId;
+  let branchId = query.branchId;
+
+  if (actor.role === "cashier") {
+    if (!actor.branchId) {
+      throw new BadRequestError("Cashier must be assigned to a branch.");
+    }
+
+    branchId = String(actor.branchId);
+  } else if (branchId !== undefined) {
+    const branch = await branchRepository.findBranchById(branchId);
+
+    if (!branch || (!isGlobalActor(actor) && String(branch.tenantId) !== String(actor.tenantId))) {
+      throw new BadRequestError("Branch not found in your tenant.");
+    }
+  }
+
+  return orderRepository.listOrders({
+    tenantId,
+    branchId,
+    status: query.status,
+    orderType: query.orderType,
+    paymentStatus: query.paymentStatus,
+    paymentMethod: query.paymentMethod,
+    from: query.from,
+    to: query.to,
+    q: query.q,
+    limit: query.limit,
+    offset: query.offset,
+  });
+}
+
+export async function getOrder(actor, orderId) {
+  const tenantId = isGlobalActor(actor) ? undefined : actor.tenantId;
+
+  const order = await orderRepository.findOrderById(orderId, tenantId);
+
+  if (!order) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  await assertOrderAccess(actor, order);
+
+  return order;
+}
+
+export async function updateOrderStatus(actor, orderId, status) {
+  const order = await getOrder(actor, orderId);
+
+  const allowed = ORDER_STATUS_TRANSITIONS[order.status] ?? [];
+
+  if (!allowed.includes(status)) {
+    throw new ConflictError(
+      `Cannot transition order from "${order.status}" to "${status}".`
+    );
+  }
+
+  const updated = await orderRepository.updateOrderStatus(orderId, status, actor._id);
+
+  if (!updated) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  return updated;
 }
 
 export async function createOrder(actor, orderInput) {
@@ -304,7 +396,7 @@ async function createOrderDocument(tenantId, branch, orderInput, items, total, n
   return orderRepository.createOrder({
     tenantId,
     foodtruckId: branch._id,
-    status: "pending",
+    status: ORDER_STATUSES.NEW,
     number,
     orderType: orderInput.orderType ?? "takeaway",
     paymentStatus: paymentMethod !== undefined ? "paid" : "pending",
@@ -312,5 +404,12 @@ async function createOrderDocument(tenantId, branch, orderInput, items, total, n
     clientContact: orderInput.clientContact,
     items,
     total: round(total),
+    statusHistory: [
+      {
+        status: ORDER_STATUSES.NEW,
+        at: new Date(),
+        by: branch._id,
+      },
+    ],
   });
 }

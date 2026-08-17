@@ -4,6 +4,7 @@ import {
   CASH_SESSION_STATUSES,
   createCashSessionTotals,
 } from "../models/cashSession.js";
+import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 import { ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { isGlobalActor } from "../utils/tenantScope.js";
 
@@ -62,4 +63,41 @@ export async function getCurrentCashSession(actor, { branchId }) {
   const tenantId = isGlobalActor(actor) ? branch.tenantId : actor.tenantId;
 
   return cashSessionRepository.findOpenByBranch(branchId, tenantId);
+}
+
+export async function closeCashSession(actor, sessionId, { closingAmounts } = {}) {
+  const tenantId = isGlobalActor(actor) ? undefined : actor.tenantId;
+
+  const session = await cashSessionRepository.findSessionById(sessionId, tenantId);
+
+  if (!session) {
+    throw new NotFoundError("Cash session not found.");
+  }
+
+  if (session.status !== CASH_SESSION_STATUSES.OPEN) {
+    throw new ConflictError("Cash session is already closed.");
+  }
+
+  const totals = session.totals ?? createCashSessionTotals();
+  const finalClosing = {};
+  const difference = {};
+
+  for (const method of PAYMENT_METHODS) {
+    const closing = closingAmounts?.[method] ?? totals[method] ?? 0;
+    finalClosing[method] = closing;
+    difference[method] = closing - (totals[method] ?? 0);
+  }
+
+  const closed = await cashSessionRepository.closeSession(sessionId, tenantId, {
+    closingAmounts: finalClosing,
+    difference,
+    closedAt: new Date(),
+    closedBy: actor._id,
+  });
+
+  if (!closed) {
+    throw new ConflictError("Cash session is already closed.");
+  }
+
+  return closed;
 }

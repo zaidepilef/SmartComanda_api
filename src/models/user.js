@@ -60,6 +60,10 @@ export function toUserDocument(user) {
     document.tenantId = user.tenantId;
   }
 
+  if (user.branchId) {
+    document.branchId = user.branchId;
+  }
+
   return document;
 }
 

@@ -74,3 +74,34 @@ export async function createOrder(req, res) {
     return handleError(res, error);
   }
 }
+
+export async function listOrders(req, res) {
+  try {
+    const orders = await orderService.listOrders(req.user, req.validatedQuery);
+    return res.status(200).json(orders);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function getOrder(req, res) {
+  try {
+    const order = await orderService.getOrder(req.user, req.params.id);
+    return res.status(200).json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function updateOrderStatus(req, res) {
+  try {
+    const order = await orderService.updateOrderStatus(
+      req.user,
+      req.params.id,
+      req.body.status
+    );
+    return res.status(200).json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}

@@ -51,3 +51,16 @@ export async function getCurrentCashSession(req, res) {
     return handleError(res, error);
   }
 }
+
+export async function closeCashSession(req, res) {
+  try {
+    const session = await cashSessionService.closeCashSession(
+      req.user,
+      req.params.id,
+      req.body
+    );
+    return res.status(200).json(session);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
