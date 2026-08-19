@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"active":{"$numberInt":"1"}},"name":"active_1"},{"v":{"$numberInt":"2"},"key":{"rut":{"$numberInt":"1"}},"name":"rut_1","unique":true}],"uuid":"96f68e18010c4c3ba92633808a7f5f18","collectionName":"tenants","type":"collection"}
