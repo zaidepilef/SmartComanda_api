@@ -5,6 +5,8 @@ dotenv.config();
 const MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://localhost:27017/smartcomanda";
 
+const DATABASE_URL = process.env.DATABASE_URL || "";
+
 const JWT_SECRET = process.env.JWT_SECRET || "";
 
 const MIN_JWT_SECRET_LENGTH = 32;
@@ -20,6 +22,13 @@ if (JWT_SECRET.length < MIN_JWT_SECRET_LENGTH) {
   process.exit(1);
 }
 
+if (!DATABASE_URL) {
+  console.error(
+    "DATABASE_URL is missing. Set it in the environment before starting the API."
+  );
+  process.exit(1);
+}
+
 if (!TURNSTILE_SECRET_KEY) {
   console.warn(
     "TURNSTILE_SECRET_KEY is not set. Public registration will reject all captcha tokens until it is configured."
@@ -29,6 +38,7 @@ if (!TURNSTILE_SECRET_KEY) {
 export const env = {
   port: Number(process.env.PORT) || 3000,
   mongodbUri: MONGODB_URI,
+  databaseUrl: DATABASE_URL,
   jwtSecret: JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
   turnstileSecretKey: TURNSTILE_SECRET_KEY,

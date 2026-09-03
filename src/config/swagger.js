@@ -42,10 +42,13 @@ const swaggerOptions = {
             lastName: { type: "string", description: "Apellido del usuario" },
             email: { type: "string", format: "email", description: "Correo electrónico" },
             name: { type: "string", description: "Nombre alternativo" },
-            role: {
-              type: "string",
-              enum: ["sysadmin", "owner", "admin", "cashier"],
-              description: "Rol del usuario",
+            roles: {
+              type: "array",
+              items: {
+                type: "string",
+                enum: ["sysadmin", "owner", "admin", "cashier"],
+              },
+              description: "Roles del usuario (múltiples roles permitidos)",
             },
             tenantId: { type: "string", description: "Identificador del tenant asociado" },
             status: {

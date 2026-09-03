@@ -1,4 +1,4 @@
-import { ObjectId } from "mongodb";
+import { toObjectIdHex } from "../utils/id.js";
 
 export const USER_STATUS = Object.freeze({
   ACTIVE: "active",
@@ -44,16 +44,13 @@ export function toUserDocument(user) {
     email: user.email,
     passwordHash: user.passwordHash,
     status: user.status ?? USER_STATUS.ACTIVE,
+    roles: Array.isArray(user.roles) ? user.roles : [],
     createdAt: now,
     updatedAt: now,
   };
 
   if (user.name) {
     document.name = user.name;
-  }
-
-  if (user.role) {
-    document.role = user.role;
   }
 
   if (user.tenantId) {
@@ -68,5 +65,5 @@ export function toUserDocument(user) {
 }
 
 export function toUserObjectId(id) {
-  return ObjectId.isValid(id) ? new ObjectId(id) : null;
+  return toObjectIdHex(id);
 }

@@ -1,7 +1,8 @@
 import * as branchRepository from "../repositories/branchRepository.js";
 import { findTenantById } from "../repositories/tenantRepository.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
-import { getTenantFilter, isGlobalActor } from "../utils/tenantScope.js";
+import { hasRole, getTenantFilter, isGlobalActor } from "../utils/tenantScope.js";
+import { USER_ROLES } from "../models/user.js";
 
 async function assertTenantExists(tenantId) {
   const tenant = await findTenantById(tenantId);
@@ -43,7 +44,7 @@ export async function listBranches(actor, { tenantId, active, q } = {}) {
     filter.q = q;
   }
 
-  const effectiveActive = actor?.role === "cashier" ? true : normalizedActive;
+  const effectiveActive = hasRole(actor, USER_ROLES.CASHIER) ? true : normalizedActive;
 
   return branchRepository.listBranches({ ...filter, active: effectiveActive });
 }

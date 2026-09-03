@@ -15,7 +15,7 @@ export const createUserSchema = z.object({
   password: z.string().min(8, "password must be at least 8 characters."),
   status: z.enum(USER_STATUSES).optional(),
   name: z.string().trim().min(1).optional(),
-  role: z.enum(USER_ROLES_LIST).optional(),
+  roles: z.array(z.enum(USER_ROLES_LIST)).optional(),
   tenantId: z
     .string()
     .regex(OBJECT_ID_PATTERN, "tenantId must be a valid ObjectId.")
@@ -24,7 +24,7 @@ export const createUserSchema = z.object({
 });
 
 export const registerUserSchema = createUserSchema
-  .omit({ name: true, role: true, tenantId: true })
+  .omit({ name: true, roles: true, tenantId: true })
   .extend({
     captchaToken: z.string().min(1, "captchaToken is required."),
   });
@@ -37,7 +37,7 @@ export const updateUserSchema = z
     password: z.string().min(8, "password must be at least 8 characters.").optional(),
     status: z.enum(USER_STATUSES).optional(),
     name: z.string().trim().min(1).optional(),
-    role: z.enum(USER_ROLES_LIST).optional(),
+    roles: z.array(z.enum(USER_ROLES_LIST)).optional(),
     tenantId: z
       .string()
       .regex(OBJECT_ID_PATTERN, "tenantId must be a valid ObjectId.")

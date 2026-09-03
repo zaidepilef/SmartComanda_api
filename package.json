@@ -6,6 +6,8 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "test": "node --test 'tests/**/*.test.js'",
+    "db:import-identity": "node src/db/importIdentity.cli.js",
+    "db:import-branches": "node src/db/importBranches.cli.js",
     "db:up": "bash ../scripts/db-up.sh",
     "db:down": "bash ../scripts/db-down.sh",
     "db:status": "bash ../scripts/db-status.sh",

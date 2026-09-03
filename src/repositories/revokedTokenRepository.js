@@ -1,16 +1,16 @@
-import { getMongoClient } from "../db/mongo.js";
-
-const REVOKED_TOKENS_COLLECTION = "revoked_tokens";
-
-function getRevokedTokensCollection() {
-  return getMongoClient().db().collection(REVOKED_TOKENS_COLLECTION);
-}
+import { getPgPool } from "../db/postgres.js";
 
 export async function revokeToken({ jti, expiresAt }) {
-  await getRevokedTokensCollection().insertOne({
-    jti,
-    expiresAt,
-  });
+  if (!jti) {
+    return;
+  }
+
+  await getPgPool().query(
+    `INSERT INTO revoked_tokens (jti, expires_at)
+     VALUES ($1, $2)
+     ON CONFLICT (jti) DO NOTHING`,
+    [jti, expiresAt instanceof Date ? expiresAt : new Date(expiresAt)]
+  );
 }
 
 export async function isTokenRevoked(jti) {
@@ -18,10 +18,10 @@ export async function isTokenRevoked(jti) {
     return false;
   }
 
-  const found = await getRevokedTokensCollection().findOne(
-    { jti },
-    { projection: { _id: 1 } }
+  const { rows } = await getPgPool().query(
+    "SELECT 1 FROM revoked_tokens WHERE jti = $1 LIMIT 1",
+    [jti]
   );
 
-  return found !== null;
+  return rows.length > 0;
 }

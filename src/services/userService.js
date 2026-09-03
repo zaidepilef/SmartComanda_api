@@ -7,13 +7,14 @@ import {
   updateUser,
 } from "../repositories/userRepository.js";
 import { findTenantById, toTenantObjectId } from "../repositories/tenantRepository.js";
-import { findBranchById, toBranchObjectId } from "../repositories/branchRepository.js";
-import { toPublicUser, toUserDocument } from "../models/user.js";
+import { findBranchById } from "../repositories/branchRepository.js";
+import { toPublicUser, toUserDocument, USER_ROLES } from "../models/user.js";
 import {
   BadRequestError,
   ForbiddenError,
   NotFoundError,
 } from "../utils/errors.js";
+import { toObjectIdHex } from "../utils/id.js";
 import {
   assertUserPayloadScoped,
   canManageUser,
@@ -29,7 +30,7 @@ function mapToPublic(user) {
 }
 
 function assertCanWriteUsers(actor) {
-  if (!isGlobalActor(actor) && actor?.role !== "admin") {
+  if (!isGlobalActor(actor) && !(actor?.roles || []).includes(USER_ROLES.ADMIN)) {
     throw new ForbiddenError("Forbidden. Sysadmin or admin role required.");
   }
 }
@@ -39,19 +40,19 @@ async function resolveTenantId(tenantId) {
     return undefined;
   }
 
-  const objectId = toTenantObjectId(tenantId);
+  const id = toObjectIdHex(tenantId);
 
-  if (!objectId) {
-    throw new BadRequestError("tenantId must be a valid ObjectId.");
+  if (!id) {
+    throw new BadRequestError("tenantId must be a valid id.");
   }
 
-  const tenant = await findTenantById(objectId);
+  const tenant = await findTenantById(id);
 
   if (!tenant) {
     throw new BadRequestError("Tenant not found.");
   }
 
-  return objectId;
+  return id;
 }
 
 async function resolveBranchId(branchId, tenantId) {
@@ -59,17 +60,17 @@ async function resolveBranchId(branchId, tenantId) {
     return undefined;
   }
 
-  const objectId = toBranchObjectId(branchId);
+  const id = toObjectIdHex(branchId);
 
-  if (!objectId) {
-    throw new BadRequestError("branchId must be a valid ObjectId.");
+  if (!id) {
+    throw new BadRequestError("branchId must be a valid id.");
   }
 
   if (!tenantId) {
     throw new BadRequestError("branchId requires the user to belong to a tenant.");
   }
 
-  const branch = await findBranchById(objectId);
+  const branch = await findBranchById(id);
 
   if (!branch) {
     throw new BadRequestError("Branch not found.");
@@ -79,22 +80,29 @@ async function resolveBranchId(branchId, tenantId) {
     throw new BadRequestError("Branch does not belong to the user's tenant.");
   }
 
-  return objectId;
+  return id;
 }
 
 export async function createUserWithPassword({ actor, ...userInput }) {
-  assertCanWriteUsers(actor);
-  assertUserPayloadScoped(actor, userInput);
+  if (actor) {
+    assertCanWriteUsers(actor);
+    assertUserPayloadScoped(actor, userInput);
+  }
 
   const passwordHash = await bcrypt.hash(userInput.password, BCRYPT_COST);
+
   const tenantId =
-    !isGlobalActor(actor) && !userInput.tenantId
+    actor && !isGlobalActor(actor) && !userInput.tenantId
       ? actor.tenantId
       : await resolveTenantId(userInput.tenantId);
   const branchId = await resolveBranchId(userInput.branchId, tenantId);
 
+  const roles = Array.isArray(userInput.roles) && userInput.roles.length > 0
+    ? userInput.roles
+    : [USER_ROLES.CASHIER];
+
   const user = await createUser(
-    toUserDocument({ ...userInput, passwordHash, tenantId, branchId })
+    toUserDocument({ ...userInput, passwordHash, tenantId, branchId, roles })
   );
   return mapToPublic(user);
 }
