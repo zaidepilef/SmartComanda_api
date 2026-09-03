@@ -1,0 +1,15 @@
+# Env files (credentials)
+.env
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+coverage/
