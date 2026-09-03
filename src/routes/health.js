@@ -1,7 +1,6 @@
 import { Router } from "express";
-import { getMongoClient } from "../db/mongo.js";
+import { isPostgresConnected, getPgPool } from "../db/postgres.js";
 
-const PING_TIMEOUT_MS = 2000;
 const router = Router();
 
 /**
@@ -9,7 +8,7 @@ const router = Router();
  * /health:
  *   get:
  *     summary: Estado del servicio
- *     description: Verifica la conectividad con la base de datos MongoDB.
+ *     description: Verifica la conectividad con la base de datos PostgreSQL.
  *     tags: [Health]
  *     responses:
  *       200:
@@ -40,9 +39,7 @@ const router = Router();
  *                   example: disconnected
  */
 router.get("/", async (req, res) => {
-  const client = getMongoClient();
-
-  if (!client) {
+  if (!isPostgresConnected()) {
     return res.status(503).json({
       status: "degraded",
       database: "disconnected",
@@ -50,7 +47,7 @@ router.get("/", async (req, res) => {
   }
 
   try {
-    await client.db().command({ ping: 1 }, { timeoutMS: PING_TIMEOUT_MS });
+    await getPgPool().query("SELECT 1");
     res.json({
       status: "ok",
       database: "connected",

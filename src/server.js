@@ -2,8 +2,6 @@ import express from "express";
 import cors from "cors";
 import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env.js";
-import { connectMongo, closeMongo, getMongoClient } from "./db/mongo.js";
-import { runMigrations } from "./db/migrations.js";
 import { connectPostgres, closePostgres, isPostgresConnected } from "./db/postgres.js";
 import { runPgMigrations } from "./db/migrations-pg.js";
 import healthRouter from "./routes/health.js";
@@ -56,11 +54,6 @@ async function start() {
     console.log(`PostgreSQL connected: ${env.databaseUrl}`);
 
     await runPgMigrations(pgPool);
-
-    await connectMongo(env.mongodbUri);
-    console.log(`MongoDB connected: ${env.mongodbUri}`);
-
-    await runMigrations(getMongoClient().db());
   } catch (error) {
     console.error("Failed to start:", error.message);
     process.exit(1);
@@ -74,7 +67,6 @@ async function start() {
 async function shutdown() {
   console.log("Shutting down...");
   await closePostgres();
-  await closeMongo();
   process.exit(0);
 }
 
