@@ -55,11 +55,13 @@ export function issueToken(user) {
     {
       email: user.email,
       status: user.status,
+      roles: Array.isArray(user.roles) ? user.roles : [],
+      tenantId: user.tenantId || undefined,
       jti: randomUUID(),
     },
     env.jwtSecret,
     {
-      subject: user._id.toString(),
+      subject: String(user._id),
       algorithm: "HS256",
       expiresIn: env.jwtExpiresIn,
     }

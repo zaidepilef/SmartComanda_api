@@ -4,6 +4,8 @@ import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env.js";
 import { connectMongo, closeMongo, getMongoClient } from "./db/mongo.js";
 import { runMigrations } from "./db/migrations.js";
+import { connectPostgres, closePostgres, isPostgresConnected } from "./db/postgres.js";
+import { runPgMigrations } from "./db/migrations-pg.js";
 import healthRouter from "./routes/health.js";
 import usersRouter from "./routes/users.js";
 import authRouter from "./routes/auth.js";
@@ -50,6 +52,11 @@ if (env.enableApiDocs) {
 
 async function start() {
   try {
+    const pgPool = connectPostgres();
+    console.log(`PostgreSQL connected: ${env.databaseUrl}`);
+
+    await runPgMigrations(pgPool);
+
     await connectMongo(env.mongodbUri);
     console.log(`MongoDB connected: ${env.mongodbUri}`);
 
@@ -66,6 +73,7 @@ async function start() {
 
 async function shutdown() {
   console.log("Shutting down...");
+  await closePostgres();
   await closeMongo();
   process.exit(0);
 }

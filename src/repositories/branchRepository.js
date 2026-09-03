@@ -1,38 +1,65 @@
-import { ObjectId } from "mongodb";
-import { getMongoClient } from "../db/mongo.js";
+import { getPgPool } from "../db/postgres.js";
+import { toObjectIdHex, generateObjectIdHex } from "../utils/id.js";
 import { NotFoundError } from "../utils/errors.js";
 import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 
-const BRANCHES_COLLECTION = "branches";
-
-function getBranchesCollection() {
-  return getMongoClient().db().collection(BRANCHES_COLLECTION);
-}
+export { PAYMENT_METHODS };
 
 export function toBranchObjectId(id) {
-  return ObjectId.isValid(id) ? new ObjectId(id) : null;
+  return toObjectIdHex(id);
 }
 
-function toTenantObjectId(tenantId) {
-  return ObjectId.isValid(tenantId) ? new ObjectId(tenantId) : null;
-}
+function rowToBranch(row) {
+  if (!row) {
+    return null;
+  }
 
-function escapeRegex(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return {
+    _id: row.id,
+    id: row.id,
+    tenantId: row.tenant_id ?? null,
+    name: row.name,
+    type: row.type,
+    address: row.address ?? null,
+    city: row.city ?? null,
+    phone: row.phone ?? null,
+    active: row.active,
+    paymentMethods: Array.isArray(row.payment_methods)
+      ? row.payment_methods
+      : PAYMENT_METHODS,
+    nextOrderNumber: row.next_order_number ?? 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 export async function createBranch(branch) {
-  const document = {
-    ...branch,
-    paymentMethods: branch.paymentMethods ?? PAYMENT_METHODS,
-    tenantId: toTenantObjectId(branch.tenantId),
-  };
-  const result = await getBranchesCollection().insertOne({
-    ...document,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
-  return { ...document, _id: result.insertedId };
+  const id = toBranchObjectId(branch._id) || toBranchObjectId(branch.id) || generateObjectIdHex();
+  const tenantId = toBranchObjectId(branch.tenantId);
+  const paymentMethods =
+    Array.isArray(branch.paymentMethods) && branch.paymentMethods.length > 0
+      ? branch.paymentMethods
+      : PAYMENT_METHODS;
+
+  const { rows } = await getPgPool().query(
+    `INSERT INTO branches (id, tenant_id, name, type, address, city, phone, active, payment_methods, next_order_number)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
+    [
+      id,
+      tenantId,
+      branch.name,
+      branch.type || "Sucursal",
+      branch.address ?? null,
+      branch.city ?? null,
+      branch.phone ?? null,
+      branch.active === undefined ? true : branch.active,
+      JSON.stringify(paymentMethods),
+      branch.nextOrderNumber ?? 0,
+    ]
+  );
+
+  return rowToBranch(rows[0]);
 }
 
 export async function updateBranch(id, update) {
@@ -42,43 +69,93 @@ export async function updateBranch(id, update) {
     throw new NotFoundError("Branch not found.");
   }
 
-  const document = {
-    ...update,
-    ...(update.tenantId !== undefined ? { tenantId: toTenantObjectId(update.tenantId) } : {}),
+  const sets = [];
+  const params = [];
+
+  const colMap = {
+    name: "name",
+    type: "type",
+    address: "address",
+    city: "city",
+    phone: "phone",
+    active: "active",
   };
 
-  const result = await getBranchesCollection().findOneAndUpdate(
-    { _id: objectId },
-    { $set: { ...document, updatedAt: new Date() } },
-    { returnDocument: "after" }
-  );
+  for (const [key, col] of Object.entries(colMap)) {
+    if (update[key] !== undefined) {
+      params.push(update[key]);
+      sets.push(`${col} = $${params.length}`);
+    }
+  }
 
-  if (!result) {
+  if (update.tenantId !== undefined) {
+    params.push(toBranchObjectId(update.tenantId));
+    sets.push(`tenant_id = $${params.length}`);
+  }
+
+  if (Array.isArray(update.paymentMethods)) {
+    params.push(JSON.stringify(update.paymentMethods));
+    sets.push(`payment_methods = $${params.length}`);
+  }
+
+  if (sets.length > 0) {
+    params.push(new Date());
+    sets.push(`updated_at = $${params.length}`);
+    params.push(objectId);
+
+    const { rows } = await getPgPool().query(
+      `UPDATE branches SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+
+    if (rows.length === 0) {
+      throw new NotFoundError("Branch not found.");
+    }
+
+    return rowToBranch(rows[0]);
+  }
+
+  const existing = await findBranchById(objectId);
+
+  if (!existing) {
     throw new NotFoundError("Branch not found.");
   }
 
-  return result;
+  return existing;
+}
+
+function escapeLike(text) {
+  return text.replace(/[\\%_]/g, "\\$&");
 }
 
 export async function listBranches({ tenantId, active, q } = {}) {
-  const filter = {};
+  const where = [];
+  const params = [];
 
   if (active !== undefined) {
-    filter.active = active;
+    params.push(active === true || active === "true");
+    where.push(`active = $${params.length}`);
   }
 
   if (tenantId !== undefined) {
-    filter.tenantId = toTenantObjectId(tenantId) ?? null;
+    const tid = toBranchObjectId(tenantId);
+    params.push(tid ?? null);
+    where.push(`tenant_id = $${params.length}`);
   }
 
-  if (q !== undefined && q.trim() !== "") {
-    filter.name = { $regex: escapeRegex(q), $options: "i" };
+  if (q !== undefined && String(q).trim() !== "") {
+    params.push(`%${escapeLike(String(q).trim())}%`);
+    where.push(`name ILIKE $${params.length}`);
   }
 
-  return getBranchesCollection()
-    .find(filter)
-    .sort({ name: 1 })
-    .toArray();
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+
+  const { rows } = await getPgPool().query(
+    `SELECT * FROM branches ${whereSql} ORDER BY name ASC`,
+    params
+  );
+
+  return rows.map(rowToBranch);
 }
 
 export async function findBranchById(id) {
@@ -88,7 +165,12 @@ export async function findBranchById(id) {
     return null;
   }
 
-  return getBranchesCollection().findOne({ _id: objectId });
+  const { rows } = await getPgPool().query(
+    "SELECT * FROM branches WHERE id = $1",
+    [objectId]
+  );
+
+  return rows.length > 0 ? rowToBranch(rows[0]) : null;
 }
 
 export async function nextOrderNumber(branchId) {
@@ -98,11 +180,13 @@ export async function nextOrderNumber(branchId) {
     return null;
   }
 
-  const result = await getBranchesCollection().findOneAndUpdate(
-    { _id: objectId },
-    { $inc: { nextOrderNumber: 1 } },
-    { returnDocument: "after" }
+  const { rows } = await getPgPool().query(
+    `UPDATE branches
+     SET next_order_number = next_order_number + 1, updated_at = NOW()
+     WHERE id = $1
+     RETURNING next_order_number`,
+    [objectId]
   );
 
-  return result?.nextOrderNumber ?? null;
+  return rows.length > 0 ? rows[0].next_order_number : null;
 }
