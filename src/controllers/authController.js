@@ -1,6 +1,7 @@
 import * as authService from "../services/authService.js";
 import * as userService from "../services/userService.js";
-import { verifyTurnstileToken } from "../services/captchaService.js";
+// DESACTIVADO temporalmente en prod: el captcha de Turnstile no funciona.
+// import { verifyTurnstileToken } from "../services/captchaService.js";
 import { USER_STATUS } from "../models/user.js";
 import {
   BadRequestError,
@@ -133,11 +134,12 @@ export async function register(req, res) {
   try {
     const { captchaToken, ...userInput } = req.body;
 
-    const isHuman = await verifyTurnstileToken(captchaToken, req.ip);
-
-    if (!isHuman) {
-      throw new BadRequestError("Captcha verification failed.");
-    }
+    // DESACTIVADA temporalmente en prod: la validación por captcha de Turnstile no funciona.
+    // const isHuman = await verifyTurnstileToken(captchaToken, req.ip);
+    //
+    // if (!isHuman) {
+    //   throw new BadRequestError("Captcha verification failed.");
+    // }
 
     const user = await userService.createUserWithPassword({
       ...userInput,
