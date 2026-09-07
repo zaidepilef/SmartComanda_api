@@ -88,20 +88,26 @@ export async function findSessionById(sessionId, tenantId) {
 
 export async function closeSession(sessionId, tenantId, patch) {
   const pool = getPgPool();
-  const conditions = ["id = $1", "status = $2"];
+
   const params = [sessionId, CASH_SESSION_STATUSES.OPEN];
+  const conditions = ["id = $1", "status = $2"];
 
   if (tenantId !== undefined) {
     params.push(tenantId);
     conditions.push(`tenant_id = $${params.length}`);
   }
 
+  const closedAtIndex = params.length + 1;
   params.push(patch.closedAt ?? new Date());
+  const closedByIndex = params.length + 1;
   params.push(patch.closedBy ?? null);
 
   const { rows } = await pool.query(
     `UPDATE cash_sessions
-     SET status = $3, closed_at = $4, closed_by = $5, updated_at = NOW()
+     SET status = '${CASH_SESSION_STATUSES.CLOSED}',
+         closed_at = $${closedAtIndex},
+         closed_by = $${closedByIndex},
+         updated_at = NOW()
      WHERE ${conditions.join(" AND ")}
      RETURNING *`,
     params
