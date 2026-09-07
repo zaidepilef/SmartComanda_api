@@ -1,16 +1,9 @@
 import * as cashSessionRepository from "../repositories/cashSessionRepository.js";
 import * as branchRepository from "../repositories/branchRepository.js";
-import {
-  CASH_SESSION_STATUSES,
-  createCashSessionTotals,
-} from "../models/cashSession.js";
+import { CASH_SESSION_STATUSES } from "../models/cashSession.js";
 import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 import { ConflictError, ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { isGlobalActor } from "../utils/tenantScope.js";
-
-function toBranchObjectId(branchId) {
-  return cashSessionRepository.toCashSessionObjectId(branchId);
-}
 
 async function assertBranchAccess(actor, branchId) {
   const branch = await branchRepository.findBranchById(branchId);
@@ -46,11 +39,10 @@ export async function openCashSession(actor, { branchId, openingAmount }) {
 
   return cashSessionRepository.createCashSession({
     tenantId,
-    branchId: toBranchObjectId(branchId),
+    branchId,
     openedBy: actor._id,
     openedAt: new Date(),
     status: CASH_SESSION_STATUSES.OPEN,
-    totals: createCashSessionTotals(),
     orderCount: 0,
     openingAmount,
   });
@@ -78,7 +70,7 @@ export async function closeCashSession(actor, sessionId, { closingAmounts } = {}
     throw new ConflictError("Cash session is already closed.");
   }
 
-  const totals = session.totals ?? createCashSessionTotals();
+  const totals = await cashSessionRepository.findTotalsBySessionId(sessionId);
   const finalClosing = {};
   const difference = {};
 
@@ -89,8 +81,6 @@ export async function closeCashSession(actor, sessionId, { closingAmounts } = {}
   }
 
   const closed = await cashSessionRepository.closeSession(sessionId, tenantId, {
-    closingAmounts: finalClosing,
-    difference,
     closedAt: new Date(),
     closedBy: actor._id,
   });
@@ -99,5 +89,5 @@ export async function closeCashSession(actor, sessionId, { closingAmounts } = {}
     throw new ConflictError("Cash session is already closed.");
   }
 
-  return closed;
+  return { ...closed, totals: finalClosing, difference };
 }

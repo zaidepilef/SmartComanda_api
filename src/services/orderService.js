@@ -184,8 +184,7 @@ export async function payOrder(actor, orderId, paymentMethod) {
   }
 
   await cashSessionRepository.incrementTotals(
-    branch._id,
-    order.tenantId,
+    openSession.id,
     paymentMethod,
     round(paid.total)
   );
@@ -275,8 +274,7 @@ export async function createOrder(actor, orderInput) {
     });
 
     const updated = await cashSessionRepository.incrementTotals(
-      branch._id,
-      tenantId,
+      openSession.id,
       paymentMethod,
       round(total)
     );
