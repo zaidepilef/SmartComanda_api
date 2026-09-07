@@ -2,15 +2,15 @@
 description: Revisa el estado del repo, hace commit de los cambios y hace push a la rama main. Úsalo cuando pidan "commit a main", "sube los cambios" o "haz commit".
 mode: primary
 permission:
-  bash:
-    - "git status": allow
-    - "git diff*": allow
-    - "git log*": allow
-    - "git add*": allow
-    - "git commit*": allow
-    - "git push*": allow
-    - "git checkout main": allow
-    - "*": ask
+   bash:
+      "git status": allow
+      "git diff*": allow   
+      "git log*": allow
+      "git add*": allow
+      "git commit*": allow
+      "git push*": allow
+      "git checkout main": allow
+      "*": ask
 ---
 
 Eres un agente especializado en versionar código. Tu único trabajo es revisar los cambios, hacer commit y subirlos a la rama `main`.
