@@ -1,19 +1,10 @@
-import { getMongoClient } from "../db/mongo.js";
+import { getPgPool } from "../db/postgres.js";
 import * as stockRepository from "../repositories/stockRepository.js";
 
 const ROUND_SCALE = 4;
 
 function roundQuantity(value) {
   return Math.round(value * 10 ** ROUND_SCALE) / 10 ** ROUND_SCALE;
-}
-
-function supportsTransactions(client) {
-  const type = client.topology?.description?.type;
-  return (
-    type === "ReplicaSetWithPrimary" ||
-    type === "Sharded" ||
-    type === "LoadBalanced"
-  );
 }
 
 export function planFifoConsumption(batches, quantity) {
@@ -85,29 +76,19 @@ async function applyBatchUpdates(batches, breakdown, { session } = {}) {
 }
 
 export async function withWriteTransaction(work) {
-  const client = getMongoClient();
-
-  if (!supportsTransactions(client)) {
-    return { transactionUnsupported: true };
-  }
-
-  let session = null;
+  const pool = getPgPool();
+  const client = await pool.connect();
 
   try {
-    session = client.startSession();
-    session.startTransaction();
-    const result = await work(session);
-    await session.commitTransaction();
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
     return result;
   } catch (error) {
-    if (session) {
-      await session.abortTransaction().catch(() => {});
-    }
+    await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
-    if (session) {
-      await session.endSession().catch(() => {});
-    }
+    client.release();
   }
 }
 
