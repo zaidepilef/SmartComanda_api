@@ -103,6 +103,13 @@ const swaggerOptions = {
             user: { $ref: "#/components/schemas/User" },
           },
         },
+        ResetPassword: {
+          type: "object",
+          required: ["password"],
+          properties: {
+            password: { type: "string", minLength: 8, description: "Nueva contraseña del usuario" },
+          },
+        },
         Error: {
           type: "object",
           properties: {

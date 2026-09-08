@@ -7,6 +7,7 @@ import { validateBody, validateQuery } from "../middleware/validation.js";
 import {
   createUserSchema,
   listUsersQuerySchema,
+  resetPasswordSchema,
   updateUserSchema,
 } from "../validation/userSchemas.js";
 
@@ -18,6 +19,7 @@ router.get("/", validateQuery(listUsersQuerySchema), userController.listUsers);
 router.post("/", requireSysadminOrAdmin, validateBody(createUserSchema), userController.createUser);
 router.get("/:id", userController.getUser);
 router.put("/:id", requireSysadminOrAdmin, validateBody(updateUserSchema), userController.updateUser);
+router.post("/:id/reset-password", requireSysadminOrAdmin, validateBody(resetPasswordSchema), userController.resetUserPassword);
 router.delete("/:id", requireSysadmin, userController.deleteUser);
 
 export default router;

@@ -27,6 +27,11 @@ export async function login(email, password) {
     throw new UnauthorizedError(GENERIC_LOGIN_ERROR);
   }
 
+  if (!user.passwordHash || typeof user.passwordHash !== "string") {
+    await comparePassword(password, DUMMY_HASH);
+    throw new UnauthorizedError(GENERIC_LOGIN_ERROR);
+  }
+
   const isValidPassword = await comparePassword(password, user.passwordHash);
 
   if (!isValidPassword) {
