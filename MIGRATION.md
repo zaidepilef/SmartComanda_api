@@ -9,22 +9,21 @@ Migración por dominio de la API (`@backend`). El servidor arranca solo con Post
 | cash sessions | `pg-cash-session-totals` | `9a7dc4f` | ✅ verificado, 30/30 tests |
 | ingredients | `pg-ingredients` | `9a7dc4f` | ✅ verificado, CRUD + duplicados OK |
 | dishes | `pg-dishes` | `1b783ed` | ✅ verificado, CRUD + JSONB recipe OK |
+| stocks | `pg-stocks` | `162b803` | ✅ verificado, FIFO + costos OK |
+| movements | `pg-movements` | (este commit) | ✅ verificado, entry/exit 201, list 200 |
+| orders | `pg-orders` | (este commit) | ✅ verificado, create/list/status/pay |
+| customers | `pg-customers` | (este commit) | ✅ verificado, upsert + balance |
+| loyalty | `pg-loyalty` | (este commit) | ✅ verificado, earn points en pay |
 
 Detalle por fase en `openspec/changes/<cambio>/`.
 
 ## Siguientes fases (por dependencias)
 
-1. `pg-stocks` — `stockRepository.js` (usado por `computeDishCostPerBranch` y orden de stock)
-2. `pg-movements` — `movementRepository.js`
-3. `pg-orders` — `orderRepository.js` (depende de dishes + customers)
-4. `pg-customers` — `customerRepository.js`
-5. `pg-loyalty` — `loyaltyRepository.js`
+No quedan repos de datos pendientes de migrar. El runtime ya no llama a `getMongoClient()`; `mongodb` solo se usa en `utils/id.js` y `dishService.js` para la clase `ObjectId` (generación/normalización de hex, no acceso a DB).
 
-Servicios con acceso directo a Mongo aún por migrar:
-- `src/services/fifoService.js` (`getMongoClient()`)
-- `src/services/loyaltyService.js` (`getMongoClient()`)
+Servicios con acceso directo a Mongo aún por migrar: ninguno (todos ya en PG o con transacciones PG).
 
-Repos ya en PG: `userRepository`, `tenantRepository`, `branchRepository`, `roleRepository`, `userRoleRepository`, `revokedTokenRepository`, `cashSessionRepository`, `ingredientRepository`, `dishRepository`.
+Repos ya en PG: `userRepository`, `tenantRepository`, `branchRepository`, `roleRepository`, `userRoleRepository`, `revokedTokenRepository`, `cashSessionRepository`, `ingredientRepository`, `dishRepository`, `stockRepository`, `movementRepository`, `orderRepository`, `customerRepository`, `loyaltyRepository`.
 
 ## Convenciones de migración (ya establecidas)
 
