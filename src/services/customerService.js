@@ -1,7 +1,7 @@
 import * as customerRepository from "../repositories/customerRepository.js";
 
-export async function upsertCustomer({ tenantId, phone }) {
-  return customerRepository.upsertCustomer({ tenantId, phone });
+export async function upsertCustomer({ tenantId, phone, name }) {
+  return customerRepository.upsertCustomer({ tenantId, phone, firstName: name });
 }
 
 export async function getCustomerByPhone({ tenantId, phone }) {

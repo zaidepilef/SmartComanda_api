@@ -1,8 +1,7 @@
-import { ObjectId } from "mongodb";
 import * as tenantRepository from "../repositories/tenantRepository.js";
 import * as customerRepository from "../repositories/customerRepository.js";
 import * as loyaltyRepository from "../repositories/loyaltyRepository.js";
-import { getMongoClient } from "../db/mongo.js";
+import * as orderRepository from "../repositories/orderRepository.js";
 import { ORDER_STATUSES } from "../models/order.js";
 
 export async function getRule(tenantId) {
@@ -27,20 +26,7 @@ export function computePoints(total, rule) {
 }
 
 async function claimOrder(orderId) {
-  const objectId = ObjectId.isValid(orderId) ? new ObjectId(orderId) : null;
-
-  if (!objectId) {
-    return null;
-  }
-
-  return getMongoClient()
-    .db()
-    .collection("orders")
-    .findOneAndUpdate(
-      { _id: objectId, pointsAwarded: { $ne: true } },
-      { $set: { pointsAwarded: true, updatedAt: new Date() } },
-      { returnDocument: "after" }
-    );
+  return orderRepository.updateOrderPointsAwarded(orderId);
 }
 
 export async function awardForOrder(order, { tenantId, branchId }) {

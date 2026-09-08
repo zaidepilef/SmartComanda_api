@@ -3,7 +3,7 @@ import { getPgPool } from "./postgres.js";
 import { generateObjectIdHex } from "../utils/id.js";
 import { env } from "../config/env.js";
 
-const TENANTS_COLLECTION = "tenant";
+const TENANTS_COLLECTION = "tenants";
 const USERS_COLLECTION = "users";
 const SYSADMIN_EMAIL = env.sysadminEmail;
 

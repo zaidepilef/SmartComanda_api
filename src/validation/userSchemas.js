@@ -48,6 +48,10 @@ export const updateUserSchema = z
     message: "At least one field must be provided.",
   });
 
+export const resetPasswordSchema = z.object({
+  password: z.string().min(8, "password must be at least 8 characters."),
+});
+
 export const listUsersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(10),

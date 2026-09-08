@@ -309,3 +309,64 @@ export async function deleteUser(req, res) {
     return handleError(res, error);
   }
 }
+
+/**
+ * @swagger
+ * /api/users/{id}/reset-password:
+ *   post:
+ *     summary: Resetear la contraseña de un usuario
+ *     description: Reestablece la contraseña de un usuario. Requiere rol sysadmin o admin (del propio tenant).
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Identificador del usuario
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ResetPassword'
+ *     responses:
+ *       200:
+ *         description: Contraseña actualizada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Datos inválidos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Sin permisos para resetear la contraseña
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       404:
+ *         description: Usuario no encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+export async function resetUserPassword(req, res) {
+  try {
+    const user = await userService.resetUserPassword({
+      actor: req.user,
+      id: req.params.id,
+      password: req.body.password,
+    });
+    return res.json(user);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}

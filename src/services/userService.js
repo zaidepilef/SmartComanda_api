@@ -157,6 +157,22 @@ export async function updateUserById({ actor, id, ...userInput }) {
   return mapToPublic(user);
 }
 
+export async function resetUserPassword({ actor, id, password }) {
+  const existing = await findUserById(id);
+
+  if (!existing) {
+    throw new NotFoundError("User not found.");
+  }
+
+  if (!canManageUser(actor, existing)) {
+    throw new ForbiddenError("Forbidden. You can only manage users of your own tenant.");
+  }
+
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+  const user = await updateUser(id, { passwordHash });
+  return mapToPublic(user);
+}
+
 export async function deleteUserById({ actor, id }) {
   if (!isGlobalActor(actor)) {
     throw new ForbiddenError("Forbidden. Sysadmin role required.");

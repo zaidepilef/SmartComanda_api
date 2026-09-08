@@ -1,32 +1,58 @@
-import { ObjectId } from "mongodb";
-import { getMongoClient } from "../db/mongo.js";
-import { toLoyaltyTransactionDocument } from "../models/loyaltyTransaction.js";
+import { getPgPool } from "../db/postgres.js";
+import { toObjectIdHex, generateObjectIdHex } from "../utils/id.js";
 
-const LOYALTY_TRANSACTIONS_COLLECTION = "loyalty-transactions";
+export function rowToLoyaltyTransaction(row) {
+  if (!row) {
+    return null;
+  }
 
-function getLoyaltyTransactionsCollection() {
-  return getMongoClient().db().collection(LOYALTY_TRANSACTIONS_COLLECTION);
-}
-
-function toObjectId(id) {
-  return ObjectId.isValid(id) ? new ObjectId(id) : null;
+  return {
+    _id: row.id,
+    id: row.id,
+    tenantId: row.tenant_id,
+    branchId: row.branch_id,
+    customerId: row.customer_id,
+    sourceOrderId: row.source_order_id,
+    type: row.type,
+    points: Number(row.points),
+    createdAt: row.created_at,
+  };
 }
 
 export async function createTransaction(transaction) {
-  const document = toLoyaltyTransactionDocument({
-    ...transaction,
-    tenantId: toObjectId(transaction.tenantId),
-    branchId: toObjectId(transaction.branchId),
-    customerId: toObjectId(transaction.customerId),
-    sourceOrderId: toObjectId(transaction.sourceOrderId),
-  });
+  const id = generateObjectIdHex();
+  const pool = getPgPool();
 
-  const result = await getLoyaltyTransactionsCollection().insertOne(document);
-  return { ...document, _id: result.insertedId };
+  const { rows } = await pool.query(
+    `INSERT INTO loyalty_transactions
+       (id, tenant_id, branch_id, customer_id, source_order_id, type, points)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      id,
+      toObjectIdHex(transaction.tenantId),
+      toObjectIdHex(transaction.branchId),
+      toObjectIdHex(transaction.customerId),
+      toObjectIdHex(transaction.sourceOrderId),
+      transaction.type,
+      transaction.points ?? 0,
+    ]
+  );
+
+  return rowToLoyaltyTransaction(rows[0]);
 }
 
 export async function findBySourceOrderId(sourceOrderId) {
-  return getLoyaltyTransactionsCollection().findOne({
-    sourceOrderId: toObjectId(sourceOrderId),
-  });
+  const objectId = toObjectIdHex(sourceOrderId);
+
+  if (!objectId) {
+    return null;
+  }
+
+  const { rows } = await getPgPool().query(
+    `SELECT * FROM loyalty_transactions WHERE source_order_id = $1`,
+    [objectId]
+  );
+
+  return rows.length > 0 ? rowToLoyaltyTransaction(rows[0]) : null;
 }
