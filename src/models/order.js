@@ -61,6 +61,10 @@ export function toOrderDocument(order) {
     document.clientPhone = order.clientPhone;
   }
 
+  if (order.clientName !== undefined) {
+    document.clientName = order.clientName;
+  }
+
   if (order.pointsAwarded !== undefined) {
     document.pointsAwarded = order.pointsAwarded;
   }

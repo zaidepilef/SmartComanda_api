@@ -25,6 +25,7 @@ const publicOrderItemSchema = z.object({
 export const createPublicOrderSchema = z.object({
   tenantId: tenantIdSchema,
   branchId: branchIdSchema,
+  name: z.string().trim().min(1, "name must not be empty.").max(80, "name is too long."),
   phone: z.string().trim().regex(PHONE_PATTERN, "phone must be a valid phone number."),
   items: z.array(publicOrderItemSchema).min(1, "items must have at least one dish."),
 });

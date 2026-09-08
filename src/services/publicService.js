@@ -61,7 +61,7 @@ export async function getPublicMenu({ tenantId, branchId }) {
   };
 }
 
-export async function createPublicOrder({ tenantId, branchId, phone, items }) {
+export async function createPublicOrder({ tenantId, branchId, name, phone, items }) {
   const { tenant, branch } = await assertPublicBranch(tenantId, branchId);
 
   const number = await branchRepository.nextOrderNumber(branch._id);
@@ -100,7 +100,7 @@ export async function createPublicOrder({ tenantId, branchId, phone, items }) {
     };
   });
 
-  const customer = await customerService.upsertCustomer({ tenantId, phone });
+  const customer = await customerService.upsertCustomer({ tenantId, phone, name });
 
   const order = await orderRepository.createOrder({
     tenantId,
@@ -109,6 +109,7 @@ export async function createPublicOrder({ tenantId, branchId, phone, items }) {
     number,
     orderType: "qr",
     paymentStatus: "pending",
+    clientName: name,
     clientPhone: phone,
     items: orderItems,
     total: round(total),

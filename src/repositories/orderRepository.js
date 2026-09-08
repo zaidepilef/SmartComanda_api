@@ -22,6 +22,7 @@ export function rowToOrder(row) {
     paymentStatus: row.payment_status,
     paymentMethod: row.payment_method ?? null,
     clientContact: row.client_contact ?? null,
+    clientName: row.client_name ?? null,
     clientPhone: row.client_phone ?? null,
     pointsAwarded: row.points_awarded,
     items: row.items ?? null,
@@ -185,9 +186,9 @@ export async function createOrder(order) {
   const { rows } = await pool.query(
     `INSERT INTO orders
        (id, tenant_id, foodtruck_id, number, status, order_type, payment_status,
-        payment_method, client_contact, client_phone, points_awarded, items,
-        status_history, total)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        payment_method, client_contact, client_phone, client_name, points_awarded,
+        items, status_history, total)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING *`,
     [
       id,
@@ -200,6 +201,7 @@ export async function createOrder(order) {
       order.paymentMethod ?? null,
       order.clientContact ?? null,
       order.clientPhone ?? null,
+      order.clientName ?? null,
       order.pointsAwarded ?? false,
       JSON.stringify(order.items ?? []),
       JSON.stringify(order.statusHistory ?? []),
