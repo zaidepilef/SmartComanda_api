@@ -80,15 +80,14 @@ Layers follow a strict flow: **route → controller → service → repository �
 | `src/routes/` | Express router definitions, one file per domain |
 | `src/controllers/` | HTTP adapters (parse request, call service, send response) |
 | `src/services/` | Business logic |
-| `src/repositories/` | Data access (PG or Mongo) |
+| `src/repositories/` | Data access (PostgreSQL) |
 | `src/models/` | Domain constants and schemas |
 | `src/validation/` | Zod schemas for request validation |
 | `src/middleware/` | Auth (JWT), role guards, rate limit, Zod validation |
 | `src/db/` | Connection pools and migration runners |
 | `src/migrations-pg/` | PostgreSQL migrations (run auto on startup) |
-| `src/migrations/` | MongoDB migrations |
 
-Entry point: `src/server.js` — connects PG, runs PG migrations, then starts Express. Mongo connects lazily per-request via middleware.
+Entry point: `src/server.js` — connects PG, runs PG migrations, then starts Express. PostgreSQL is the only datastore.
 # Referencias a módulos (@)
 
 Cuando el usuario escriba una mención con `@` (p. ej. `@backend`), se refiere al repositorio/ubicación independiente de ESE módulo, NO al monorepo. Este patrón se aplicará a todos los módulos a medida que vayan separándose. este ya esta separado

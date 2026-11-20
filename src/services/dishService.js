@@ -1,4 +1,3 @@
-import { ObjectId } from "mongodb";
 import * as dishRepository from "../repositories/dishRepository.js";
 import * as ingredientRepository from "../repositories/ingredientRepository.js";
 import * as stockRepository from "../repositories/stockRepository.js";
@@ -9,11 +8,11 @@ import { getTenantFilter, isGlobalActor } from "../utils/tenantScope.js";
 const MANAGER_ROLES = ["owner", "admin"];
 
 function toRecipeLine(line) {
-  return { ...line, ingredientId: new ObjectId(line.ingredientId) };
+  return { ...line, ingredientId: String(line.ingredientId) };
 }
 
 function toBranchPrice(entry) {
-  return { ...entry, branchId: new ObjectId(entry.branchId) };
+  return { ...entry, branchId: String(entry.branchId) };
 }
 
 function assertCanManage(actor) {

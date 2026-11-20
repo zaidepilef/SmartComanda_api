@@ -2,9 +2,6 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const MONGODB_URI =
-  process.env.MONGODB_URI || "mongodb://localhost:27017/smartcomanda";
-
 const DATABASE_URL = process.env.DATABASE_URL || "";
 
 const JWT_SECRET = process.env.JWT_SECRET || "";
@@ -37,7 +34,6 @@ if (!TURNSTILE_SECRET_KEY) {
 
 export const env = {
   port: Number(process.env.PORT) || 3000,
-  mongodbUri: MONGODB_URI,
   databaseUrl: DATABASE_URL,
   jwtSecret: JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "1h",
