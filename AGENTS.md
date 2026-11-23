@@ -18,7 +18,7 @@ DB scripts (`db:up`, `db:down`, etc.) reference `../scripts/` — they expect th
 
 ---
 
-description: Revisa el estado del repo. Úsalo cuando pidan "commit a main", "sube los cambios" o "haz commit".
+description: Revisa el estado del repo. Úsalo cuando pidan "sube los cambios" o "haz commit".
 mode: primary
 
 permission:
@@ -26,15 +26,26 @@ bash:
 "git status": allow
 "git diff*": allow
 "git log*": allow
+"git branch --show-current": allow
 "git add*": allow
 "git commit*": allow
-"git push*": allow
-"git checkout main": allow
+"git push*": ask
 "*": ask
 
 ---
 
-Eres un agente especializado en versionar código. Tu único trabajo es revisar los cambios, hacer commit y subirlos a la rama `main`.
+Eres un agente especializado en versionar código. Tu único trabajo es revisar los cambios, hacer commit y subirlos a la **rama de trabajo actual** (`develop`, `feature/*`, `fix/*` o `refactor/*`).
+
+## Estrategia de ramas (Git Flow)
+
+```
+feature/* · fix/* · refactor/*  →  develop  →  main  →  release
+        (trabajo)               (integración) (estable) (producción)
+```
+
+- `release` es **producción**: Dokploy despliega este repo desde `release`.
+- **Nunca** se commitea ni se pushea directamente a `main` ni a `release`. Solo reciben cambios por PR en GitHub, con **"Create a merge commit"** (sin squash ni rebase) para no dejar huérfanos los punteros de submódulo del monorepo.
+- Liberar a producción = PR de `main` a `release`.
 
 ## Procedimiento
 
@@ -45,7 +56,7 @@ Eres un agente especializado en versionar código. Tu único trabajo es revisar 
    * `git diff --staged`
    * `git log --oneline -10` para conocer el estilo de los mensajes de commit del repo.
 
-2. **Confirma que estás en `main`** con `git branch --show-current`. Si no estás en `main`, cambia con `git checkout main` antes de continuar.
+2. **Confirma la rama** con `git branch --show-current`. Debe ser `develop` o una rama de trabajo (`feature/*`, `fix/*`, `refactor/*`). Si estás en `main`, en `release` o con HEAD separado, **detente y avísale al usuario**: no cambies de rama por tu cuenta.
 
 3. **Revisa qué vas a commitear.** No commitees archivos que no correspondan:
 
@@ -59,9 +70,9 @@ Eres un agente especializado en versionar código. Tu único trabajo es revisar 
 
    * `git add <archivos>`
    * `git commit -m "<mensaje>"`
-   * `git push origin main`
+   * `git push origin <rama-actual>`
 
-6. **Verifica** que el push fue exitoso, que `git status` quede limpio y que la rama esté sincronizada con `origin/main`.
+6. **Verifica** que el push fue exitoso, que `git status` quede limpio y que la rama esté sincronizada con `origin/<rama-actual>`.
 
 ## Reglas importantes
 
@@ -69,6 +80,7 @@ Eres un agente especializado en versionar código. Tu único trabajo es revisar 
 * Si hay cambios sin relacionar o el pull falla, detente y avísale al usuario.
 * Si el working tree está limpio y no hay nada que commitear, dímelo.
 * No hagas cambios de configuración de git, no hagas force-push ni crees ramas nuevas, a menos que se te pida explícitamente.
+* Nunca hagas `push` a `main` ni a `release`, aunque te lo pidan como "commit a main": explica que debe ir por PR.
 
 
 ## Architecture
@@ -80,15 +92,14 @@ Layers follow a strict flow: **route → controller → service → repository �
 | `src/routes/` | Express router definitions, one file per domain |
 | `src/controllers/` | HTTP adapters (parse request, call service, send response) |
 | `src/services/` | Business logic |
-| `src/repositories/` | Data access (PG or Mongo) |
+| `src/repositories/` | Data access (PostgreSQL) |
 | `src/models/` | Domain constants and schemas |
 | `src/validation/` | Zod schemas for request validation |
 | `src/middleware/` | Auth (JWT), role guards, rate limit, Zod validation |
 | `src/db/` | Connection pools and migration runners |
 | `src/migrations-pg/` | PostgreSQL migrations (run auto on startup) |
-| `src/migrations/` | MongoDB migrations |
 
-Entry point: `src/server.js` — connects PG, runs PG migrations, then starts Express. Mongo connects lazily per-request via middleware.
+Entry point: `src/server.js` — connects PG, runs PG migrations, then starts Express. PostgreSQL is the only datastore.
 # Referencias a módulos (@)
 
 Cuando el usuario escriba una mención con `@` (p. ej. `@backend`), se refiere al repositorio/ubicación independiente de ESE módulo, NO al monorepo. Este patrón se aplicará a todos los módulos a medida que vayan separándose. este ya esta separado
@@ -104,17 +115,19 @@ Cada módulo tiene su propio repositorio dedicado:
 
 Reglas:
 
-- Al tocar código de un módulo `@X`, operar dentro de su repositorio dedicado (clonado en `/Users/ougt/Documents/GitHub/<Repo>`), no en el monorepo.
-- Commitear y empujar en el repo del módulo correspondiente
+- Al tocar código de un módulo `@X`, operar dentro de su carpeta de submódulo en el workspace `/Users/ougt/Sources/SmartComanda`, no en otra copia.
+- Commitear y empujar primero en el repo del módulo; después actualizar el puntero del submódulo en el monorepo.
 
 ---
 
-Arquitectura/ubicaciones actuales:
+Arquitectura/ubicaciones actuales (submódulos del workspace `/Users/ougt/Sources/SmartComanda`):
 
-- `backend` → repo independiente `SmartComanda_api` (`/Users/ougt/Documents/GitHub/SmartComanda_api`), referido como `@backend`.
-- `frontend-admin` → repo independiente `SmartComanda_admin` (`/Users/ougt/Documents/GitHub/SmartComanda_admin`), referido como `@frontend-admin`.
-- `frontend-pos` → repo independiente `SmartComanda_pos` (`/Users/ougt/Documents/GitHub/SmartComanda_pos`), referido como `@frontend-pos`.
-- `frontend-client` → repo independiente `SmartComanda_client` (`/Users/ougt/Documents/GitHub/SmartComanda_client`), referido como `@frontend-client`.
+- `@backend` → repo `SmartComanda_api`, carpeta `SmartComanda_api/`.
+- `@frontend-admin` → repo `SmartComanda_admin`, carpeta `SmartComanda_admin/`.
+- `@frontend-pos` → repo `SmartComanda_pos`, carpeta `SmartComanda_pos/`.
+- `@frontend-client` → repo `SmartComanda_client`, carpeta `SmartComanda_client/`.
+
+Las copias en `/Users/ougt/Documents/GitHub/` están desactualizadas: no usarlas.
 
 
 
@@ -197,7 +210,7 @@ Para nuevas funcionalidades:
 
 Referencia: `@backend` = repo `SmartComanda_api`.
 
-Ubicación: `/Users/ougt/Documents/GitHub/SmartComanda_api`
+Ubicación: `/Users/ougt/Sources/SmartComanda/SmartComanda_api` (submódulo del workspace)
 Tecnología:
 
 - Node.js.
@@ -206,7 +219,7 @@ Tecnología:
 
 Reglas:
 
-- Operar dentro del repo `SmartComanda_api` (clonado en `/Users/ougt/Documents/GitHub/SmartComanda_api`), NO en `/SmartComanda/backend`.
+- Operar dentro de la carpeta `SmartComanda_api/` del workspace `/Users/ougt/Sources/SmartComanda`, NO en otra copia.
 - Mantener separación por capas.
 - No mezclar lógica de negocio con rutas.
 - Validar entradas.

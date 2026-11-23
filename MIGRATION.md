@@ -1,5 +1,7 @@
 # Migración MongoDB → PostgreSQL — Estado
 
+> **Completada (2026-11-20).** MongoDB fue eliminado por completo: sin dependencia `mongodb`, sin `src/db/mongo.js`, sin migraciones ni importadores Mongo. Los ids se generan con `node:crypto` (`src/utils/id.js`). Este archivo queda como registro histórico.
+
 Migración por dominio de la API (`@backend`). El servidor arranca solo con PostgreSQL (`runPgMigrations`); los repos que aún usan Mongo están rotos en runtime hasta migrarse.
 
 ## Haz completado

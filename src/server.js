@@ -48,10 +48,20 @@ if (env.enableApiDocs) {
   });
 }
 
+// Describes the database target without credentials (never log DATABASE_URL).
+function describeDatabase(databaseUrl) {
+  try {
+    const { hostname, port, pathname } = new URL(databaseUrl);
+    return `${hostname}:${port || 5432}${pathname}`;
+  } catch {
+    return "(invalid DATABASE_URL)";
+  }
+}
+
 async function start() {
   try {
     const pgPool = connectPostgres();
-    console.log(`PostgreSQL connected: ${env.databaseUrl}`);
+    console.log(`PostgreSQL connected: ${describeDatabase(env.databaseUrl)}`);
 
     await runPgMigrations(pgPool);
   } catch (error) {
