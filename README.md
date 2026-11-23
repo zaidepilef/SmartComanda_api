@@ -1,6 +1,6 @@
 # SmartComanda API
 
-Backend para gestión de restaurantes y food trucks. Arquitectura dual: **PostgreSQL** (identidad/tenants/usuarios/sucursales) + **MongoDB** (menú/inventario/pedidos/caja).
+Backend para gestión de restaurantes y food trucks. Toda la persistencia vive en **PostgreSQL**.
 
 ## Stack
 
@@ -9,12 +9,12 @@ Backend para gestión de restaurantes y food trucks. Arquitectura dual: **Postgr
 - **Validación**: Zod 4
 - **Auth**: JWT + bcrypt + Cloudflare Turnstile
 - **Docs**: Swagger/OpenAPI 3.0
-- **Base de datos**: PostgreSQL 16 + MongoDB 8
+- **Base de datos**: PostgreSQL 16
 
 ## Requisitos
 
 - Node.js ≥ 22
-- Docker (para PostgreSQL y MongoDB)
+- Docker (para PostgreSQL)
 - npm
 
 ## Inicio rápido
@@ -22,7 +22,7 @@ Backend para gestión de restaurantes y food trucks. Arquitectura dual: **Postgr
 ```bash
 # 1. Levantar bases de datos
 cd ../SmartComanda
-docker compose up -d postgres mongodb
+docker compose up -d postgres
 
 # 2. Instalar dependencias
 cd ../SmartComanda_api
@@ -44,7 +44,6 @@ La API arranca en `http://localhost:3000`. Las migraciones corren automáticamen
 |----------|-----------|-------------|
 | `DATABASE_URL` | Sí | URL de PostgreSQL (`postgresql://user:pass@host:5432/db`) |
 | `JWT_SECRET` | Sí | Secretos JWT (mínimo 32 caracteres) |
-| `MONGODB_URI` | No | URI de MongoDB (default: `mongodb://localhost:27017/smartcomanda`) |
 | `PORT` | No | Puerto de la API (default: `3000`) |
 | `JWT_EXPIRES_IN` | No | Expiración del JWT (default: `1h`) |
 | `TURNSTILE_SECRET_KEY` | No | Secret de Cloudflare Turnstile para captcha |
@@ -152,33 +151,34 @@ La API arranca en `http://localhost:3000`. Las migraciones corren automáticamen
 src/
 ├── config/          # Configuración (env, swagger)
 ├── controllers/     # Adaptadores HTTP (request → service → response)
-├── db/              # Conexiones y migraciones (PG + Mongo)
+├── db/              # Conexión y runner de migraciones PostgreSQL
 ├── middleware/       # Auth, roles, rate limit, validación Zod
-├── migrations/      # Migraciones MongoDB (9)
-├── migrations-pg/   # Migraciones PostgreSQL (2)
+├── migrations-pg/   # Migraciones PostgreSQL versionadas (corren al iniciar)
 ├── models/          # Constantes y esquemas de dominio
 ├── repositories/    # Capa de acceso a datos
 ├── routes/          # Definición de endpoints
 ├── services/        # Lógica de negocio
-├── utils/           # Helpers (errores, ObjectId, tenant scope)
+├── utils/           # Helpers (errores, ids, tenant scope)
 └── validation/      # Schemas Zod para request validation
 ```
 
 ## Arquitectura de datos
 
-### PostgreSQL — Dominio de identidad
+### Identidad
 - `tenant` — Restaurantes/empresas
 - `roles` — Roles del sistema (sysadmin, owner, admin, cashier)
 - `users` / `user_roles` — Usuarios y sus roles
 - `revoked_tokens` — Tokens JWT revocados
 - `branches` — Sucursales con métodos de pago y numeración de pedidos
 
-### MongoDB — Dominio de tenant
-- `ingredients` / `dishes` — Menú con recetas
-- `stocks` / `inventory-movements` — Inventario FIFO por lote
+### Operación del tenant
+- `ingredients` / `dishes` — Menú con recetas (JSONB `recipe`, `branch_prices`)
+- `stocks` / `inventory_movements` — Inventario FIFO por lote (transacciones PG)
 - `orders` — Pedidos con máquina de estados
-- `cash-sessions` — Sesiones de caja (abrir/cerrar)
-- `customers` / `loyalty-transactions` — Clientes y puntos de fidelidad
+- `cash_sessions` — Sesiones de caja (abrir/cerrar)
+- `customers` / `loyalty_transactions` — Clientes y puntos de fidelidad
+
+Los ids son strings hex de 24 caracteres (`src/utils/id.js`), compatibles con los ids históricos.
 
 ## Test
 
