@@ -119,6 +119,12 @@ test("cash: QR order is hidden from kitchen until charged, then cancel reverses 
   const { order: paid } = await orderService.payOrder(cashier, order._id, "cash");
   assert.equal(paid.paymentStatus, "paid");
   assert.equal(paid.cashSessionId, session.id);
+  assert.equal(paid.paidBy, ctx.owner._id);
+
+  const fetched = await orderService.getOrder(cashier, order._id);
+  assert.equal(fetched.paidByName, "Olga Owner");
+  const [listed] = await orderService.listOrders(admin, { branchId: ctx.branchId, q: String(order.number) });
+  assert.equal(listed.paidByName, "Olga Owner");
   assert.ok(paid.paidAt);
 
   await assert.rejects(() => orderService.payOrder(cashier, order._id, "cash"), ConflictError);
@@ -167,12 +173,13 @@ test("cash: close persists counted amounts and differences; reopen after closing
     ConflictError
   );
 
-  await orderService.createOrder(cashier, {
+  const { order: counterOrder } = await orderService.createOrder(cashier, {
     foodtruckId: ctx.branchId,
     orderType: "takeaway",
     paymentMethod: "cash",
     items: [{ dishId: ctx.dishId, quantity: 6, stockApplied: false }],
   });
+  assert.equal(counterOrder.paidBy, ctx.owner._id);
   await orderService.createOrder(cashier, {
     foodtruckId: ctx.branchId,
     orderType: "takeaway",

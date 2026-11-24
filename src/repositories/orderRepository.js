@@ -30,6 +30,8 @@ export function rowToOrder(row) {
     total: Number(row.total),
     cashSessionId: row.cash_session_id ?? null,
     paidAt: row.paid_at ?? null,
+    paidBy: row.paid_by ?? null,
+    paidByName: row.paid_by_name ?? null,
     cancelReason: row.cancel_reason ?? null,
     cancelledBy: row.cancelled_by ?? null,
     cancelledAt: row.cancelled_at ?? null,
@@ -39,6 +41,10 @@ export function rowToOrder(row) {
     updatedAt: row.updated_at,
   };
 }
+
+/** Columnas de pedido más el nombre de quien lo cobró. */
+const ORDER_SELECT = `SELECT o.*, NULLIF(TRIM(CONCAT(pu.first_name, ' ', pu.last_name)), '') AS paid_by_name
+   FROM orders o LEFT JOIN users pu ON pu.id = o.paid_by`;
 
 function escapeLike(text) {
   return text.replace(/[\\%_]/g, "\\$&");
@@ -64,44 +70,44 @@ export async function listOrders({
 
   if (tenantId !== undefined) {
     params.push(tenantId);
-    conditions.push(`tenant_id = $${params.length}`);
+    conditions.push(`o.tenant_id = $${params.length}`);
   }
 
   if (branchId !== undefined) {
     params.push(branchId);
-    conditions.push(`foodtruck_id = $${params.length}`);
+    conditions.push(`o.foodtruck_id = $${params.length}`);
   }
 
   if (status !== undefined) {
     const statuses = Array.isArray(status) ? status : [status];
     params.push(statuses);
-    conditions.push(`status = ANY($${params.length}::varchar[])`);
+    conditions.push(`o.status = ANY($${params.length}::varchar[])`);
   }
 
   if (orderType !== undefined) {
     params.push(orderType);
-    conditions.push(`order_type = $${params.length}`);
+    conditions.push(`o.order_type = $${params.length}`);
   }
 
   if (paymentStatus !== undefined) {
     params.push(paymentStatus);
-    conditions.push(`payment_status = $${params.length}`);
+    conditions.push(`o.payment_status = $${params.length}`);
   }
 
   if (paymentMethod !== undefined) {
     params.push(paymentMethod);
-    conditions.push(`payment_method = $${params.length}`);
+    conditions.push(`o.payment_method = $${params.length}`);
   }
 
   if (from !== undefined || to !== undefined) {
     if (from !== undefined) {
       params.push(new Date(from));
-      conditions.push(`created_at >= $${params.length}`);
+      conditions.push(`o.created_at >= $${params.length}`);
     }
 
     if (to !== undefined) {
       params.push(new Date(to));
-      conditions.push(`created_at <= $${params.length}`);
+      conditions.push(`o.created_at <= $${params.length}`);
     }
   }
 
@@ -109,13 +115,13 @@ export async function listOrders({
     const search = String(q).trim();
     const clauses = [];
     params.push(`%${escapeLike(search)}%`);
-    clauses.push(`client_contact ILIKE $${params.length}`);
+    clauses.push(`o.client_contact ILIKE $${params.length}`);
 
     const number = Number(search);
 
     if (Number.isInteger(number)) {
       params.push(number);
-      clauses.push(`number = $${params.length}`);
+      clauses.push(`o.number = $${params.length}`);
     }
 
     conditions.push(`(${clauses.join(" OR ")})`);
@@ -123,7 +129,7 @@ export async function listOrders({
 
   if (kitchen) {
     // Cocina no ve pedidos QR hasta que se cobran.
-    conditions.push(`NOT (order_type = 'qr' AND payment_status = 'pending')`);
+    conditions.push(`NOT (o.order_type = 'qr' AND o.payment_status = 'pending')`);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -132,7 +138,7 @@ export async function listOrders({
   const offsetValue = offset ?? 0;
 
   const { rows } = await pool.query(
-    `SELECT * FROM orders ${where} ORDER BY created_at DESC
+    `${ORDER_SELECT} ${where} ORDER BY o.created_at DESC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, limitValue, offsetValue]
   );
@@ -152,11 +158,11 @@ export async function findOrderById(orderId, tenantId) {
 
   if (tenantId !== undefined) {
     params.push(tenantId);
-    tenantClause = `AND tenant_id = $${params.length}`;
+    tenantClause = `AND o.tenant_id = $${params.length}`;
   }
 
   const { rows } = await getPgPool().query(
-    `SELECT * FROM orders WHERE id = $1 ${tenantClause}`,
+    `${ORDER_SELECT} WHERE o.id = $1 ${tenantClause}`,
     params
   );
 
@@ -200,8 +206,8 @@ export async function createOrder(order, client = getPgPool()) {
     `INSERT INTO orders
        (id, tenant_id, foodtruck_id, number, status, order_type, payment_status,
         payment_method, client_contact, client_phone, client_name, points_awarded,
-        items, status_history, total, cash_session_id, paid_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        items, status_history, total, cash_session_id, paid_at, paid_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       id,
@@ -221,6 +227,7 @@ export async function createOrder(order, client = getPgPool()) {
       order.total ?? 0,
       order.cashSessionId ?? null,
       order.cashSessionId ? new Date() : null,
+      order.cashSessionId && order.paidBy ? String(order.paidBy) : null,
     ]
   );
 
@@ -263,14 +270,14 @@ export async function lockOrder(client, orderId) {
 }
 
 /** Marca como cobrado un pedido pendiente y lo asocia a la caja. */
-export async function markPaid(client, orderId, { paymentMethod, cashSessionId }) {
+export async function markPaid(client, orderId, { paymentMethod, cashSessionId, paidBy }) {
   const { rows } = await client.query(
     `UPDATE orders
      SET payment_status = 'paid', payment_method = $2, cash_session_id = $3,
-         paid_at = NOW(), updated_at = NOW()
+         paid_at = NOW(), paid_by = $4, updated_at = NOW()
      WHERE id = $1 AND payment_status = 'pending' AND status <> 'cancelled'
      RETURNING *`,
-    [orderId, paymentMethod, cashSessionId]
+    [orderId, paymentMethod, cashSessionId, paidBy ? String(paidBy) : null]
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;

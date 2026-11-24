@@ -218,6 +218,7 @@ export async function payOrder(actor, orderId, paymentMethod) {
     const updated = await orderRepository.markPaid(client, locked._id, {
       paymentMethod,
       cashSessionId: session.id,
+      paidBy: actor._id,
     });
 
     await cashSessionRepository.recordSale(client, session.id, {
@@ -393,7 +394,7 @@ export async function createOrder(actor, orderInput) {
             items,
             total,
             number,
-            { client, cashSessionId: session.id }
+            { client, cashSessionId: session.id, paidBy: actor._id }
           );
 
           await cashSessionRepository.recordSale(client, session.id, {
@@ -589,7 +590,7 @@ async function createOrderDocument(
   items,
   total,
   number,
-  { client, cashSessionId } = {}
+  { client, cashSessionId, paidBy } = {}
 ) {
   const paymentMethod = orderInput.paymentMethod;
 
@@ -605,6 +606,7 @@ async function createOrderDocument(
     items,
     total: round(total),
     cashSessionId,
+    paidBy,
     statusHistory: [
       {
         status: ORDER_STATUSES.NEW,
