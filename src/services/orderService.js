@@ -9,16 +9,21 @@ import * as inventoryService from "./inventoryService.js";
 import * as fifoService from "./fifoService.js";
 import * as loyaltyService from "./loyaltyService.js";
 import {
+  CANCELLABLE_STATUSES,
+  ORDER_PAYMENT_STATUSES,
   ORDER_STATUSES,
   ORDER_STATUS_TRANSITIONS,
 } from "../models/order.js";
+import { USER_ROLES } from "../models/user.js";
+import { withTransaction } from "../db/postgres.js";
+import { can } from "../utils/permissions.js";
 import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
   NotFoundError,
 } from "../utils/errors.js";
-import { isGlobalActor } from "../utils/tenantScope.js";
+import { actorRoles, isGlobalActor } from "../utils/tenantScope.js";
 import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 
 const ROUND_SCALE = 4;
@@ -64,6 +69,14 @@ function assertTenantActor(actor) {
   }
 }
 
+const MANAGER_ROLES = [USER_ROLES.SYSADMIN, USER_ROLES.OWNER, USER_ROLES.ADMIN];
+
+/** Cajero o cocinero sin rol de gestión: opera solo en su sucursal asignada. */
+function isBranchStaff(actor) {
+  const roles = actorRoles(actor);
+  return roles.length > 0 && !roles.some((role) => MANAGER_ROLES.includes(role));
+}
+
 async function assertOrderAccess(actor, order) {
   const orderTenantId = String(order.tenantId);
   const actorTenantId = actor.tenantId ? String(actor.tenantId) : null;
@@ -76,7 +89,7 @@ async function assertOrderAccess(actor, order) {
     throw new NotFoundError("Order not found.");
   }
 
-  if (actor.role === "cashier" && actor.branchId) {
+  if (isBranchStaff(actor) && actor.branchId) {
     if (String(order.foodtruckId) !== String(actor.branchId)) {
       throw new NotFoundError("Order not found.");
     }
@@ -89,11 +102,7 @@ export async function listOrders(actor, query = {}) {
   const tenantId = isGlobalActor(actor) ? query.tenantId : actor.tenantId;
   let branchId = query.branchId;
 
-  if (actor.role === "cashier") {
-    if (!actor.branchId) {
-      throw new BadRequestError("Cashier must be assigned to a branch.");
-    }
-
+  if (isBranchStaff(actor) && actor.branchId) {
     branchId = String(actor.branchId);
   } else if (branchId !== undefined) {
     const branch = await branchRepository.findBranchById(branchId);
@@ -113,6 +122,7 @@ export async function listOrders(actor, query = {}) {
     from: query.from,
     to: query.to,
     q: query.q,
+    kitchen: query.kitchen,
     limit: query.limit,
     offset: query.offset,
   });
@@ -135,12 +145,28 @@ export async function getOrder(actor, orderId) {
 export async function updateOrderStatus(actor, orderId, status) {
   const order = await getOrder(actor, orderId);
 
+  if (status === ORDER_STATUSES.CANCELLED) {
+    if (!can(actor, "order.cancel")) {
+      throw new ForbiddenError("Forbidden. Your role cannot cancel orders.");
+    }
+
+    throw new BadRequestError("Use POST /api/orders/:id/cancel with a reason to cancel an order.");
+  }
+
   const allowed = ORDER_STATUS_TRANSITIONS[order.status] ?? [];
 
   if (!allowed.includes(status)) {
     throw new ConflictError(
       `Cannot transition order from "${order.status}" to "${status}".`
     );
+  }
+
+  if (
+    order.orderType === "qr" &&
+    order.paymentStatus === ORDER_PAYMENT_STATUSES.PENDING &&
+    status === ORDER_STATUSES.PREPARING
+  ) {
+    throw new ConflictError("QR orders must be charged before the kitchen starts them.");
   }
 
   const updated = await orderRepository.updateOrderStatus(orderId, status, actor._id);
@@ -152,14 +178,8 @@ export async function updateOrderStatus(actor, orderId, status) {
   return updated;
 }
 
-export async function payOrder(actor, orderId, paymentMethod) {
-  const order = await getOrder(actor, orderId);
-
-  if (order.paymentStatus !== "pending") {
-    throw new ConflictError("Only pending orders can be paid.");
-  }
-
-  const branch = await branchRepository.findBranchById(order.foodtruckId);
+async function resolveBranchPaymentMethod(branchId, paymentMethod) {
+  const branch = await branchRepository.findBranchById(branchId);
 
   if (!branch) {
     throw new NotFoundError("Branch not found.");
@@ -171,23 +191,43 @@ export async function payOrder(actor, orderId, paymentMethod) {
     throw new BadRequestError("Payment method not supported by this branch.");
   }
 
-  const openSession = await cashSessionRepository.findOpenByBranch(branch._id, order.tenantId);
+  return branch;
+}
 
-  if (!openSession) {
-    throw new ConflictError("No open cash session for this branch.");
-  }
+export async function payOrder(actor, orderId, paymentMethod) {
+  const order = await getOrder(actor, orderId);
+  const branch = await resolveBranchPaymentMethod(order.foodtruckId, paymentMethod);
 
-  const paid = await orderRepository.payOrder(orderId, paymentMethod);
+  const paid = await withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, orderId);
 
-  if (!paid) {
-    throw new ConflictError("Order is not pending.");
-  }
+    if (!locked || locked.status === ORDER_STATUSES.CANCELLED) {
+      throw new ConflictError("Cancelled orders cannot be paid.");
+    }
 
-  await cashSessionRepository.incrementTotals(
-    openSession.id,
-    paymentMethod,
-    round(paid.total)
-  );
+    if (locked.paymentStatus !== ORDER_PAYMENT_STATUSES.PENDING) {
+      throw new ConflictError("Only pending orders can be paid.");
+    }
+
+    const session = await cashSessionRepository.lockOpenByBranch(client, branch._id, order.tenantId);
+
+    if (!session) {
+      throw new ConflictError("No open cash session for this branch.");
+    }
+
+    const updated = await orderRepository.markPaid(client, locked._id, {
+      paymentMethod,
+      cashSessionId: session.id,
+    });
+
+    await cashSessionRepository.recordSale(client, session.id, {
+      method: paymentMethod,
+      amount: round(updated.total),
+      count: 1,
+    });
+
+    return updated;
+  });
 
   const pointsEarned = await loyaltyService.awardForOrder(paid, {
     tenantId: order.tenantId,
@@ -203,6 +243,105 @@ export async function payOrder(actor, orderId, paymentMethod) {
   return result;
 }
 
+/**
+ * Anula un pedido con motivo. Si estaba cobrado, revierte su monto en la caja
+ * donde se cobró (debe seguir abierta).
+ */
+export async function cancelOrder(actor, orderId, reason) {
+  await getOrder(actor, orderId);
+
+  return withTransaction(async (client) => {
+    const order = await orderRepository.lockOrder(client, orderId);
+
+    if (!CANCELLABLE_STATUSES.includes(order.status)) {
+      throw new ConflictError(`Cannot cancel an order in status "${order.status}".`);
+    }
+
+    const wasPaid = order.paymentStatus === ORDER_PAYMENT_STATUSES.PAID;
+
+    if (wasPaid) {
+      if (!order.cashSessionId) {
+        throw new ConflictError("This paid order has no cash session recorded; it cannot be reversed.");
+      }
+
+      const session = await cashSessionRepository.lockById(client, order.cashSessionId);
+
+      if (!session || session.status !== "open") {
+        throw new ConflictError("The cash session where this order was paid is already closed.");
+      }
+
+      await cashSessionRepository.recordSale(client, session.id, {
+        method: order.paymentMethod,
+        amount: -round(order.total),
+        count: -1,
+      });
+    }
+
+    return orderRepository.markCancelled(client, order._id, {
+      reason,
+      actorId: actor._id,
+      refunded: wasPaid,
+    });
+  });
+}
+
+/** Reemplaza los ítems de un pedido pendiente que cocina aún no empezó. */
+export async function correctOrder(actor, orderId, inputItems) {
+  const order = await getOrder(actor, orderId);
+  const { items, total } = await buildOrderItems(order.tenantId, order.foodtruckId, inputItems);
+
+  return withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, orderId);
+
+    if (
+      locked.paymentStatus !== ORDER_PAYMENT_STATUSES.PENDING ||
+      locked.status !== ORDER_STATUSES.NEW
+    ) {
+      throw new ConflictError("Only pending orders not yet in preparation can be corrected.");
+    }
+
+    return orderRepository.replaceItems(client, locked._id, {
+      items,
+      total,
+      actorId: actor._id,
+    });
+  });
+}
+
+/** Resuelve platos y precios del servidor para los ítems pedidos. */
+async function buildOrderItems(tenantId, branchId, inputItems) {
+  const dishIds = inputItems.map((item) => item.dishId);
+  const dishes = await dishRepository.findDishesByIds(dishIds, { tenantId });
+
+  if (dishes.length !== new Set(dishIds.map(String)).size) {
+    throw new BadRequestError("An item references a dish that does not exist.");
+  }
+
+  const dishesById = new Map(dishes.map((dish) => [String(dish._id), dish]));
+  let total = 0;
+
+  const items = inputItems.map((item, index) => {
+    const dish = dishesById.get(String(item.dishId));
+
+    if (!dish) {
+      throw new BadRequestError(`Item ${index + 1} references a dish outside your tenant.`);
+    }
+
+    const price = resolveDishPrice(dish, branchId);
+    total += price * item.quantity;
+
+    return {
+      dishId: dish._id,
+      name: dish.name,
+      price,
+      quantity: item.quantity,
+      stockApplied: false,
+    };
+  });
+
+  return { items, total: round(total), dishesById };
+}
+
 export async function createOrder(actor, orderInput) {
   assertTenantActor(actor);
 
@@ -216,14 +355,12 @@ export async function createOrder(actor, orderInput) {
     throw new BadRequestError("Payment method not supported by this branch.");
   }
 
-  let openSession = null;
-
-  if (paymentMethod !== undefined) {
-    openSession = await cashSessionRepository.findOpenByBranch(branch._id, tenantId);
-
-    if (!openSession) {
-      throw new ConflictError("No open cash session for this branch.");
-    }
+  // Verificación temprana para no consumir un número de pedido si no hay caja.
+  if (
+    paymentMethod !== undefined &&
+    !(await cashSessionRepository.findOpenByBranch(branch._id, tenantId))
+  ) {
+    throw new ConflictError("No open cash session for this branch.");
   }
 
   const number = await branchRepository.nextOrderNumber(branch._id);
@@ -232,38 +369,41 @@ export async function createOrder(actor, orderInput) {
     throw new NotFoundError("Branch not found.");
   }
 
-  const dishIds = orderInput.items.map((item) => item.dishId);
-  const dishes = await dishRepository.findDishesByIds(dishIds, { tenantId });
-
-  if (dishes.length !== new Set(dishIds.map(String)).size) {
-    throw new BadRequestError("An item references a dish that does not exist.");
-  }
-
-  const dishesById = new Map(dishes.map((dish) => [String(dish._id), dish]));
+  const { items, total, dishesById } = await buildOrderItems(
+    tenantId,
+    branch._id,
+    orderInput.items
+  );
   const warnings = [];
-  let total = 0;
 
-  const items = orderInput.items.map((item, index) => {
-    const dish = dishesById.get(String(item.dishId));
+  const order =
+    paymentMethod === undefined
+      ? await createOrderDocument(tenantId, branch, orderInput, items, total, number)
+      : await withTransaction(async (client) => {
+          const session = await cashSessionRepository.lockOpenByBranch(client, branch._id, tenantId);
 
-    if (!dish) {
-      throw new BadRequestError(`Item ${index + 1} references a dish outside your tenant.`);
-    }
+          if (!session) {
+            throw new ConflictError("No open cash session for this branch.");
+          }
 
-    const price = resolveDishPrice(dish, branch._id);
+          const created = await createOrderDocument(
+            tenantId,
+            branch,
+            orderInput,
+            items,
+            total,
+            number,
+            { client, cashSessionId: session.id }
+          );
 
-    total += price * item.quantity;
+          await cashSessionRepository.recordSale(client, session.id, {
+            method: paymentMethod,
+            amount: total,
+            count: 1,
+          });
 
-    return {
-      dishId: dish._id,
-      name: dish.name,
-      price,
-      quantity: item.quantity,
-      stockApplied: false,
-    };
-  });
-
-  const order = await createOrderDocument(tenantId, branch, orderInput, items, round(total), number);
+          return created;
+        });
 
   let pointsEarned = null;
 
@@ -272,18 +412,6 @@ export async function createOrder(actor, orderInput) {
       tenantId,
       branchId: branch._id,
     });
-
-    const updated = await cashSessionRepository.incrementTotals(
-      openSession.id,
-      paymentMethod,
-      round(total)
-    );
-
-    if (!updated) {
-      console.warn(
-        `Cash session for branch ${branch._id} closed before order ${order._id} could be recorded.`
-      );
-    }
   }
 
   const pool = await inventoryService.resolveStockPool(actor, branch._id, tenantId);
@@ -454,7 +582,15 @@ async function tryDeductDishStock(pool, dish, quantity, tenantId, actor, orderId
   return { applied: true, missing: [] };
 }
 
-async function createOrderDocument(tenantId, branch, orderInput, items, total, number) {
+async function createOrderDocument(
+  tenantId,
+  branch,
+  orderInput,
+  items,
+  total,
+  number,
+  { client, cashSessionId } = {}
+) {
   const paymentMethod = orderInput.paymentMethod;
 
   return orderRepository.createOrder({
@@ -468,6 +604,7 @@ async function createOrderDocument(tenantId, branch, orderInput, items, total, n
     clientContact: orderInput.clientContact,
     items,
     total: round(total),
+    cashSessionId,
     statusHistory: [
       {
         status: ORDER_STATUSES.NEW,
@@ -475,5 +612,5 @@ async function createOrderDocument(tenantId, branch, orderInput, items, total, n
         by: branch._id,
       },
     ],
-  });
+  }, client);
 }

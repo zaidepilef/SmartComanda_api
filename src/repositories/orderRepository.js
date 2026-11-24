@@ -28,6 +28,13 @@ export function rowToOrder(row) {
     items: row.items ?? null,
     statusHistory: row.status_history ?? null,
     total: Number(row.total),
+    cashSessionId: row.cash_session_id ?? null,
+    paidAt: row.paid_at ?? null,
+    cancelReason: row.cancel_reason ?? null,
+    cancelledBy: row.cancelled_by ?? null,
+    cancelledAt: row.cancelled_at ?? null,
+    correctedBy: row.corrected_by ?? null,
+    correctedAt: row.corrected_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -47,6 +54,7 @@ export async function listOrders({
   from,
   to,
   q,
+  kitchen,
   limit,
   offset,
 }) {
@@ -111,6 +119,11 @@ export async function listOrders({
     }
 
     conditions.push(`(${clauses.join(" OR ")})`);
+  }
+
+  if (kitchen) {
+    // Cocina no ve pedidos QR hasta que se cobran.
+    conditions.push(`NOT (order_type = 'qr' AND payment_status = 'pending')`);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -179,16 +192,16 @@ export async function updateOrderStatus(orderId, status, actorId) {
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
 }
 
-export async function createOrder(order) {
+export async function createOrder(order, client = getPgPool()) {
   const id = generateObjectIdHex();
-  const pool = getPgPool();
+  const pool = client;
 
   const { rows } = await pool.query(
     `INSERT INTO orders
        (id, tenant_id, foodtruck_id, number, status, order_type, payment_status,
         payment_method, client_contact, client_phone, client_name, points_awarded,
-        items, status_history, total)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        items, status_history, total, cash_session_id, paid_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
      RETURNING *`,
     [
       id,
@@ -206,6 +219,8 @@ export async function createOrder(order) {
       JSON.stringify(order.items ?? []),
       JSON.stringify(order.statusHistory ?? []),
       order.total ?? 0,
+      order.cashSessionId ?? null,
+      order.cashSessionId ? new Date() : null,
     ]
   );
 
@@ -231,19 +246,58 @@ export async function updateOrderItems(orderId, items) {
   return rowToOrder(rows[0]);
 }
 
-export async function payOrder(orderId, paymentMethod) {
+function historyEntry(status, actorId) {
+  return JSON.stringify([{ status, at: new Date(), by: actorId ? String(actorId) : null }]);
+}
+
+/** Lee y bloquea el pedido dentro de una transacción. */
+export async function lockOrder(client, orderId) {
   const objectId = toOrderObjectId(orderId);
 
   if (!objectId) {
     return null;
   }
 
-  const { rows } = await getPgPool().query(
+  const { rows } = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [objectId]);
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+/** Marca como cobrado un pedido pendiente y lo asocia a la caja. */
+export async function markPaid(client, orderId, { paymentMethod, cashSessionId }) {
+  const { rows } = await client.query(
     `UPDATE orders
-     SET payment_status = 'paid', payment_method = $2, updated_at = NOW()
-     WHERE id = $1 AND payment_status = 'pending'
+     SET payment_status = 'paid', payment_method = $2, cash_session_id = $3,
+         paid_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND payment_status = 'pending' AND status <> 'cancelled'
      RETURNING *`,
-    [objectId, paymentMethod]
+    [orderId, paymentMethod, cashSessionId]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+export async function markCancelled(client, orderId, { reason, actorId, refunded }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET status = 'cancelled',
+         payment_status = CASE WHEN $4 THEN 'refunded' ELSE payment_status END,
+         cancel_reason = $2, cancelled_by = $3, cancelled_at = NOW(), updated_at = NOW(),
+         status_history = status_history || $5::jsonb
+     WHERE id = $1
+     RETURNING *`,
+    [orderId, reason, actorId ? String(actorId) : null, Boolean(refunded), historyEntry("cancelled", actorId)]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+export async function replaceItems(client, orderId, { items, total, actorId }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET items = $2, total = $3, corrected_by = $4, corrected_at = NOW(), updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [orderId, JSON.stringify(items), total, actorId ? String(actorId) : null]
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;

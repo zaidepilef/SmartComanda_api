@@ -33,6 +33,10 @@ export const listOrdersQuerySchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   q: z.string().trim().min(1).optional(),
+  kitchen: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === "true"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -59,4 +63,23 @@ export const payOrderSchema = z.object({
   paymentMethod: z.enum(PAYMENT_METHODS, {
     message: "paymentMethod must be one of the payment methods.",
   }),
+});
+export const cancelOrderSchema = z.strictObject({
+  reason: z
+    .string({ message: "reason is required." })
+    .trim()
+    .min(1, "reason is required.")
+    .max(200, "reason must be at most 200 characters."),
+});
+
+export const correctOrderSchema = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        dishId: z.string().regex(OBJECT_ID_PATTERN, "dishId must be a valid ObjectId."),
+        quantity: z.number().int().positive("quantity must be a positive integer.").max(99),
+      })
+    )
+    .min(1, "items must have at least one dish.")
+    .max(50),
 });

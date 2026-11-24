@@ -1,5 +1,6 @@
 import { ForbiddenError } from "./errors.js";
 import { USER_ROLES } from "../models/user.js";
+import { assignableRoles, can } from "./permissions.js";
 
 function actorRoles(actor) {
   if (!actor) {
@@ -49,14 +50,22 @@ export function canReadUser(actor, targetUser) {
   return tenantIdsEqual(targetUser.tenantId, actor.tenantId);
 }
 
+/**
+ * Owner y Encargado gestionan usuarios de su tenant cuyos roles podrían asignar
+ * (el Encargado no edita al owner ni a otros Encargados).
+ */
 export function canManageUser(actor, targetUser) {
   if (isGlobalActor(actor)) {
     return true;
   }
-  if (!hasRole(actor, USER_ROLES.ADMIN)) {
+  if (!can(actor, "user.manage")) {
     return false;
   }
   if (!targetUser || !targetUser.tenantId || hasRole(targetUser, USER_ROLES.SYSADMIN)) {
+    return false;
+  }
+  const allowed = assignableRoles(actor);
+  if (!actorRoles(targetUser).every((role) => allowed.has(role))) {
     return false;
   }
   return tenantIdsEqual(targetUser.tenantId, actor.tenantId);
@@ -69,6 +78,11 @@ export function assertUserPayloadScoped(actor, payload) {
   const payloadRoles = Array.isArray(payload.roles) ? payload.roles : [];
   if (payloadRoles.includes(USER_ROLES.SYSADMIN)) {
     throw new ForbiddenError("Forbidden. Cannot assign the sysadmin role.");
+  }
+  const allowed = assignableRoles(actor);
+  const forbidden = payloadRoles.find((role) => !allowed.has(role));
+  if (forbidden) {
+    throw new ForbiddenError(`Forbidden. Your role cannot assign the "${forbidden}" role.`);
   }
   if (
     payload.tenantId !== undefined &&

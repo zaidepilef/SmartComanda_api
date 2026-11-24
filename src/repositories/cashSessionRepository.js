@@ -24,6 +24,7 @@ function rowToSession(row) {
     closedAt: row.closed_at,
     closedBy: row.closed_by,
     orderCount: row.order_count,
+    closingNote: row.closing_note ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -86,36 +87,6 @@ export async function findSessionById(sessionId, tenantId) {
   return rowToSession(rows[0] ?? null);
 }
 
-export async function closeSession(sessionId, tenantId, patch) {
-  const pool = getPgPool();
-
-  const params = [sessionId, CASH_SESSION_STATUSES.OPEN];
-  const conditions = ["id = $1", "status = $2"];
-
-  if (tenantId !== undefined) {
-    params.push(tenantId);
-    conditions.push(`tenant_id = $${params.length}`);
-  }
-
-  const closedAtIndex = params.length + 1;
-  params.push(patch.closedAt ?? new Date());
-  const closedByIndex = params.length + 1;
-  params.push(patch.closedBy ?? null);
-
-  const { rows } = await pool.query(
-    `UPDATE cash_sessions
-     SET status = '${CASH_SESSION_STATUSES.CLOSED}',
-         closed_at = $${closedAtIndex},
-         closed_by = $${closedByIndex},
-         updated_at = NOW()
-     WHERE ${conditions.join(" AND ")}
-     RETURNING *`,
-    params
-  );
-
-  return rowToSession(rows[0] ?? null);
-}
-
 export async function findTotalsBySessionId(sessionId) {
   const pool = getPgPool();
 
@@ -133,17 +104,83 @@ export async function findTotalsBySessionId(sessionId) {
   return totals;
 }
 
-export async function incrementTotals(sessionId, method, total) {
-  const pool = getPgPool();
+/** Lee y bloquea la caja abierta de la sucursal dentro de una transacción. */
+export async function lockOpenByBranch(client, branchId, tenantId) {
+  const { rows } = await client.query(
+    `SELECT * FROM cash_sessions
+     WHERE branch_id = $1 AND tenant_id = $2 AND status = $3
+     LIMIT 1
+     FOR UPDATE`,
+    [branchId, tenantId, CASH_SESSION_STATUSES.OPEN]
+  );
 
-  const { rows } = await pool.query(
+  return rowToSession(rows[0] ?? null);
+}
+
+export async function lockById(client, sessionId) {
+  const { rows } = await client.query(`SELECT * FROM cash_sessions WHERE id = $1 FOR UPDATE`, [
+    sessionId,
+  ]);
+
+  return rowToSession(rows[0] ?? null);
+}
+
+/**
+ * Suma (o resta, con valores negativos) una venta al total del medio de pago
+ * y a la cantidad de ventas de la caja.
+ */
+export async function recordSale(client, sessionId, { method, amount, count }) {
+  await client.query(
     `INSERT INTO cash_session_totals (session_id, method, amount)
      VALUES ($1, $2, $3)
      ON CONFLICT (session_id, method)
-     DO UPDATE SET amount = cash_session_totals.amount + EXCLUDED.amount
-     RETURNING *`,
-    [sessionId, method, total]
+     DO UPDATE SET amount = cash_session_totals.amount + EXCLUDED.amount`,
+    [sessionId, method, amount]
   );
 
-  return rows[0] ?? null;
+  await client.query(
+    `UPDATE cash_sessions SET order_count = GREATEST(order_count + $2, 0), updated_at = NOW()
+     WHERE id = $1`,
+    [sessionId, count]
+  );
+}
+
+/** Cierra la caja y guarda el arqueo por medio de pago. */
+export async function saveClosure(client, sessionId, { closedBy, note, lines }) {
+  const { rows } = await client.query(
+    `UPDATE cash_sessions
+     SET status = $2, closed_at = NOW(), closed_by = $3, closing_note = $4, updated_at = NOW()
+     WHERE id = $1 AND status = $5
+     RETURNING *`,
+    [sessionId, CASH_SESSION_STATUSES.CLOSED, closedBy ?? null, note ?? null, CASH_SESSION_STATUSES.OPEN]
+  );
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  for (const line of lines) {
+    await client.query(
+      `INSERT INTO cash_session_closures (session_id, method, expected, counted, difference)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [sessionId, line.method, line.expected, line.counted, line.difference]
+    );
+  }
+
+  return rowToSession(rows[0]);
+}
+
+export async function findClosureLines(sessionId) {
+  const { rows } = await getPgPool().query(
+    `SELECT method, expected, counted, difference FROM cash_session_closures
+     WHERE session_id = $1 ORDER BY method`,
+    [sessionId]
+  );
+
+  return rows.map((row) => ({
+    method: row.method,
+    expected: Number(row.expected),
+    counted: Number(row.counted),
+    difference: Number(row.difference),
+  }));
 }
