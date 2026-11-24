@@ -39,6 +39,13 @@ async function createTenantWithBranch() {
 }
 
 const now = () => new Date().toISOString();
+
+// Rango que incluye con margen los eventos recién creados (el límite "to" es exclusivo).
+const recentRange = () =>
+  journeyRangeQuerySchema.parse({
+    from: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    to: new Date(Date.now() + 60 * 1000).toISOString(),
+  });
 const PHONE = "+56900000001";
 
 // ── deriveStage (puro) ──────────────────────────────────────────────
@@ -139,7 +146,7 @@ test("journey: ingest, server outcome, sessions, timeline and funnel", async () 
   );
   assert.ok(rows.every((row) => !row.data.includes(PHONE) && !row.data.includes("Ana")));
 
-  const range = journeyRangeQuerySchema.parse({});
+  const range = recentRange();
   const [session] = await journeyService.listSessions(actor, branchId, range);
   assert.equal(session.sessionId, sessionId);
   assert.equal(session.stage, JOURNEY_STAGES.ORDER_FAILED);
@@ -155,6 +162,29 @@ test("journey: ingest, server outcome, sessions, timeline and funnel", async () 
   assert.equal(timeline.events.at(-1).source, "server");
 
   const funnel = await journeyService.getFunnel(actor, branchId, range);
+  assert.equal(funnel.qrOpened, 1);
+  assert.equal(funnel.identified, 1);
+  assert.equal(funnel.withCart, 1);
+  assert.equal(funnel.orderSubmitted, 1);
+  assert.equal(funnel.orderCreated, 0);
+  assert.equal(funnel.failedAttempts, 1);
+});
+
+test("journey: funnel is cumulative when client events are missing", async () => {
+  const { tenantId, branchId } = await createTenantWithBranch();
+  const actor = { roles: ["admin"], tenantId };
+  const sessionId = randomUUID();
+
+  // Solo el evento de servidor: el cliente no llegó a enviar los suyos.
+  await journeyService.recordOrderOutcome({
+    sessionId,
+    tenantId,
+    branchId,
+    status: 400,
+    body: { error: "Invalid payload." },
+  });
+
+  const funnel = await journeyService.getFunnel(actor, branchId, recentRange());
   assert.equal(funnel.qrOpened, 1);
   assert.equal(funnel.identified, 1);
   assert.equal(funnel.withCart, 1);

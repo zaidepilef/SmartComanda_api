@@ -129,16 +129,19 @@ export async function listSessionEvents({ tenantId, branchId, sessionId }) {
   return rows.map(rowToEvent);
 }
 
-/** Cantidad de sesiones que alcanzaron cada paso, e intentos fallidos. */
+/**
+ * Cantidad de sesiones que alcanzaron cada paso, e intentos fallidos.
+ * Es acumulativo: una sesión que llegó a un paso cuenta en todos los anteriores,
+ * aunque se haya perdido algún evento del cliente (cierre abrupto, bloqueador).
+ */
 export async function funnel({ tenantId, branchId, from, to }) {
   const { rows } = await getPgPool().query(
     `WITH per_session AS (
        SELECT
          session_id,
-         BOOL_OR(type = 'qr_opened') AS opened,
          BOOL_OR(type = 'identity_submitted') AS identified,
          BOOL_OR(type = 'item_added') AS with_cart,
-         BOOL_OR(type = 'order_submitted') AS submitted,
+         BOOL_OR(type IN ('order_submitted', 'order_created', 'order_failed')) AS submitted,
          BOOL_OR(type = 'order_created') AS created,
          COUNT(*) FILTER (WHERE type = 'order_failed')::int AS failures
        FROM customer_journey_events
@@ -147,9 +150,9 @@ export async function funnel({ tenantId, branchId, from, to }) {
      )
      SELECT
        COUNT(*)::int AS sessions,
-       COUNT(*) FILTER (WHERE opened)::int AS qr_opened,
-       COUNT(*) FILTER (WHERE identified)::int AS identified,
-       COUNT(*) FILTER (WHERE with_cart)::int AS with_cart,
+       COUNT(*)::int AS qr_opened,
+       COUNT(*) FILTER (WHERE identified OR with_cart OR submitted)::int AS identified,
+       COUNT(*) FILTER (WHERE with_cart OR submitted)::int AS with_cart,
        COUNT(*) FILTER (WHERE submitted)::int AS order_submitted,
        COUNT(*) FILTER (WHERE created)::int AS order_created,
        COALESCE(SUM(failures), 0)::int AS failed_attempts
