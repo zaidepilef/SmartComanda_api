@@ -44,3 +44,12 @@ export async function getCustomerBalance(req, res) {
     return handleError(res, error);
   }
 }
+
+export async function getDeliveryEstimate(req, res) {
+  try {
+    const result = await publicService.getDeliveryEstimate(req.body);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}

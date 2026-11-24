@@ -15,6 +15,8 @@ import inventoryRouter from "./routes/inventory.js";
 import ordersRouter from "./routes/orders.js";
 import cashSessionsRouter from "./routes/cash-sessions.js";
 import publicRouter from "./routes/public.js";
+import publicEventsRouter from "./routes/publicEvents.js";
+import { purgeExpiredEvents } from "./services/journeyService.js";
 import swaggerSpec from "./config/swagger.js";
 
 const app = express();
@@ -39,6 +41,8 @@ app.use("/api/dishes", dishesRouter);
 app.use("/api/inventory", inventoryRouter);
 app.use("/api/orders", ordersRouter);
 app.use("/api/cash-sessions", cashSessionsRouter);
+// Antes de /api/public para usar su propio límite de tasa.
+app.use("/api/public/events", publicEventsRouter);
 app.use("/api/public", publicRouter);
 
 if (env.enableApiDocs) {
@@ -48,16 +52,45 @@ if (env.enableApiDocs) {
   });
 }
 
+// Describes the database target without credentials (never log DATABASE_URL).
+function describeDatabase(databaseUrl) {
+  try {
+    const { hostname, port, pathname } = new URL(databaseUrl);
+    return `${hostname}:${port || 5432}${pathname}`;
+  } catch {
+    return "(invalid DATABASE_URL)";
+  }
+}
+
+const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+// Borra a diario los eventos del recorrido de clientes con más de 90 días.
+function scheduleJourneyRetention() {
+  const run = () =>
+    purgeExpiredEvents()
+      .then((deleted) => {
+        if (deleted > 0) {
+          console.log(`Journey retention: ${deleted} expired events deleted.`);
+        }
+      })
+      .catch((error) => console.error("Journey retention failed:", error.message));
+
+  run();
+  setInterval(run, RETENTION_INTERVAL_MS).unref();
+}
+
 async function start() {
   try {
     const pgPool = connectPostgres();
-    console.log(`PostgreSQL connected: ${env.databaseUrl}`);
+    console.log(`PostgreSQL connected: ${describeDatabase(env.databaseUrl)}`);
 
     await runPgMigrations(pgPool);
   } catch (error) {
     console.error("Failed to start:", error.message);
     process.exit(1);
   }
+
+  scheduleJourneyRetention();
 
   app.listen(env.port, () => {
     console.log(`API running on port ${env.port}`);

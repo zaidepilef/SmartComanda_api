@@ -6,6 +6,7 @@ import * as customerService from "./customerService.js";
 import * as loyaltyService from "./loyaltyService.js";
 import { ORDER_STATUSES } from "../models/order.js";
 import { NotFoundError, BadRequestError } from "../utils/errors.js";
+import { estimateDelivery } from "../utils/geo.js";
 
 const ROUND_SCALE = 4;
 
@@ -20,7 +21,7 @@ function resolveDishPrice(dish, branchId) {
   return override ? override.price : dish.salePrice;
 }
 
-async function assertPublicBranch(tenantId, branchId) {
+export async function assertPublicBranch(tenantId, branchId) {
   const tenant = await tenantRepository.findTenantById(tenantId);
 
   if (!tenant || tenant.active === false) {
@@ -61,7 +62,57 @@ export async function getPublicMenu({ tenantId, branchId }) {
   };
 }
 
-export async function createPublicOrder({ tenantId, branchId, name, phone, items }) {
+/**
+ * Estimación de envío para la app del cliente. No expone las coordenadas
+ * ni los límites de la sucursal.
+ */
+export async function getDeliveryEstimate({ tenantId, branchId, lat, lng }) {
+  const { branch } = await assertPublicBranch(tenantId, branchId);
+  const estimate = estimateDelivery(branch, { lat, lng });
+
+  if (!estimate) {
+    return { estimate: null };
+  }
+
+  return {
+    estimate: {
+      distanceKm: estimate.distanceKm,
+      etaMinutes: estimate.etaMinutes,
+      outOfRange: estimate.outOfRange,
+    },
+  };
+}
+
+/** Datos de entrega a guardar; la estimación la calcula el servidor. */
+function buildDeliveryFields(branch, orderType, delivery) {
+  if (orderType !== "delivery" || !delivery) {
+    return {};
+  }
+
+  const hasPoint = delivery.lat !== undefined && delivery.lng !== undefined;
+  const estimate = hasPoint ? estimateDelivery(branch, { lat: delivery.lat, lng: delivery.lng }) : null;
+
+  return {
+    deliveryAddress: delivery.address,
+    deliveryReference: delivery.reference || null,
+    deliveryLat: hasPoint ? delivery.lat : null,
+    deliveryLng: hasPoint ? delivery.lng : null,
+    deliveryAccuracyM: delivery.accuracy !== undefined ? Math.round(delivery.accuracy) : null,
+    deliveryDistanceKm: estimate?.distanceKm ?? null,
+    deliveryEtaMinutes: estimate?.etaMinutes ?? null,
+    deliveryOutOfRange: estimate ? estimate.outOfRange : null,
+  };
+}
+
+export async function createPublicOrder({
+  tenantId,
+  branchId,
+  name,
+  phone,
+  orderType = "qr",
+  delivery,
+  items,
+}) {
   const { tenant, branch } = await assertPublicBranch(tenantId, branchId);
 
   const number = await branchRepository.nextOrderNumber(branch._id);
@@ -107,12 +158,13 @@ export async function createPublicOrder({ tenantId, branchId, name, phone, items
     foodtruckId: branch._id,
     status: ORDER_STATUSES.NEW,
     number,
-    orderType: "qr",
+    orderType,
     paymentStatus: "pending",
     clientName: name,
     clientPhone: phone,
     items: orderItems,
     total: round(total),
+    ...buildDeliveryFields(branch, orderType, delivery),
     statusHistory: [
       {
         status: ORDER_STATUSES.NEW,
@@ -128,6 +180,10 @@ export async function createPublicOrder({ tenantId, branchId, name, phone, items
     number: order.number,
     orderId: String(order._id),
     total: order.total,
+    orderType: order.orderType,
+    deliveryEtaMinutes: order.deliveryEtaMinutes,
+    deliveryDistanceKm: order.deliveryDistanceKm,
+    deliveryOutOfRange: order.deliveryOutOfRange,
     pointsRate: rule?.pointsPerAmount ?? null,
     pointsBalance: customer?.pointsBalance ?? 0,
   };

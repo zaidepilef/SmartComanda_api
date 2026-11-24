@@ -15,6 +15,7 @@ import {
   NotFoundError,
 } from "../utils/errors.js";
 import { toObjectIdHex } from "../utils/id.js";
+import { can } from "../utils/permissions.js";
 import {
   assertUserPayloadScoped,
   canManageUser,
@@ -30,8 +31,8 @@ function mapToPublic(user) {
 }
 
 function assertCanWriteUsers(actor) {
-  if (!isGlobalActor(actor) && !(actor?.roles || []).includes(USER_ROLES.ADMIN)) {
-    throw new ForbiddenError("Forbidden. Sysadmin or admin role required.");
+  if (!can(actor, "user.manage")) {
+    throw new ForbiddenError("Forbidden. Sysadmin, owner, or admin role required.");
   }
 }
 

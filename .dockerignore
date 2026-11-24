@@ -1,0 +1,15 @@
+# Never send secrets or local artifacts to the Docker build context
+.env
+.env.*
+!env.example
+node_modules
+npm-debug.log
+.git
+.gitignore
+.DS_Store
+backup
+coverage
+tests
+openspec
+.opencode
+*.md
