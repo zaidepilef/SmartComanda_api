@@ -1,6 +1,7 @@
 import { Router } from "express";
 import * as publicController from "../controllers/publicController.js";
 import { publicRateLimit } from "../middleware/rateLimit.js";
+import { trackOrderOutcome } from "../middleware/trackOrderOutcome.js";
 import { validateBody, validateQuery } from "../middleware/validation.js";
 import {
   createPublicOrderSchema,
@@ -19,6 +20,7 @@ router.get(
 );
 router.post(
   "/orders",
+  trackOrderOutcome,
   validateBody(createPublicOrderSchema),
   publicController.createPublicOrder
 );

@@ -20,7 +20,7 @@ function resolveDishPrice(dish, branchId) {
   return override ? override.price : dish.salePrice;
 }
 
-async function assertPublicBranch(tenantId, branchId) {
+export async function assertPublicBranch(tenantId, branchId) {
   const tenant = await tenantRepository.findTenantById(tenantId);
 
   if (!tenant || tenant.active === false) {
