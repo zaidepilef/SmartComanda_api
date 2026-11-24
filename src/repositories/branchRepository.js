@@ -9,6 +9,8 @@ export function toBranchObjectId(id) {
   return toObjectIdHex(id);
 }
 
+const toNumberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
+
 function rowToBranch(row) {
   if (!row) {
     return null;
@@ -28,6 +30,11 @@ function rowToBranch(row) {
       ? row.payment_methods
       : PAYMENT_METHODS,
     nextOrderNumber: row.next_order_number ?? 0,
+    lat: toNumberOrNull(row.lat),
+    lng: toNumberOrNull(row.lng),
+    deliveryMaxKm: toNumberOrNull(row.delivery_max_km),
+    deliveryMaxMinutes: toNumberOrNull(row.delivery_max_minutes),
+    deliveryAvgSpeedKmh: toNumberOrNull(row.delivery_avg_speed_kmh) ?? 25,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -42,8 +49,9 @@ export async function createBranch(branch) {
       : PAYMENT_METHODS;
 
   const { rows } = await getPgPool().query(
-    `INSERT INTO branches (id, tenant_id, name, type, address, city, phone, active, payment_methods, next_order_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO branches (id, tenant_id, name, type, address, city, phone, active, payment_methods, next_order_number,
+       lat, lng, delivery_max_km, delivery_max_minutes, delivery_avg_speed_kmh)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING *`,
     [
       id,
@@ -56,6 +64,11 @@ export async function createBranch(branch) {
       branch.active === undefined ? true : branch.active,
       JSON.stringify(paymentMethods),
       branch.nextOrderNumber ?? 0,
+      branch.lat ?? null,
+      branch.lng ?? null,
+      branch.deliveryMaxKm ?? null,
+      branch.deliveryMaxMinutes ?? null,
+      branch.deliveryAvgSpeedKmh ?? 25,
     ]
   );
 
@@ -79,6 +92,11 @@ export async function updateBranch(id, update) {
     city: "city",
     phone: "phone",
     active: "active",
+    lat: "lat",
+    lng: "lng",
+    deliveryMaxKm: "delivery_max_km",
+    deliveryMaxMinutes: "delivery_max_minutes",
+    deliveryAvgSpeedKmh: "delivery_avg_speed_kmh",
   };
 
   for (const [key, col] of Object.entries(colMap)) {

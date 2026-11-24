@@ -23,6 +23,25 @@ export function getPgPool() {
   return pool;
 }
 
+/**
+ * Ejecuta fn(client) dentro de una transacción; hace ROLLBACK si fn lanza.
+ */
+export async function withTransaction(fn) {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closePostgres() {
   if (pool) {
     await pool.end();

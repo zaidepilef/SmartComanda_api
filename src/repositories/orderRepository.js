@@ -6,6 +6,8 @@ export function toOrderObjectId(id) {
   return toObjectIdHex(id);
 }
 
+const numberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
+
 export function rowToOrder(row) {
   if (!row) {
     return null;
@@ -28,10 +30,31 @@ export function rowToOrder(row) {
     items: row.items ?? null,
     statusHistory: row.status_history ?? null,
     total: Number(row.total),
+    cashSessionId: row.cash_session_id ?? null,
+    paidAt: row.paid_at ?? null,
+    paidBy: row.paid_by ?? null,
+    paidByName: row.paid_by_name ?? null,
+    cancelReason: row.cancel_reason ?? null,
+    cancelledBy: row.cancelled_by ?? null,
+    cancelledAt: row.cancelled_at ?? null,
+    correctedBy: row.corrected_by ?? null,
+    correctedAt: row.corrected_at ?? null,
+    deliveryAddress: row.delivery_address ?? null,
+    deliveryReference: row.delivery_reference ?? null,
+    deliveryLat: numberOrNull(row.delivery_lat),
+    deliveryLng: numberOrNull(row.delivery_lng),
+    deliveryAccuracyM: numberOrNull(row.delivery_accuracy_m),
+    deliveryDistanceKm: numberOrNull(row.delivery_distance_km),
+    deliveryEtaMinutes: numberOrNull(row.delivery_eta_minutes),
+    deliveryOutOfRange: row.delivery_out_of_range ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
+
+/** Columnas de pedido más el nombre de quien lo cobró. */
+const ORDER_SELECT = `SELECT o.*, NULLIF(TRIM(CONCAT(pu.first_name, ' ', pu.last_name)), '') AS paid_by_name
+   FROM orders o LEFT JOIN users pu ON pu.id = o.paid_by`;
 
 function escapeLike(text) {
   return text.replace(/[\\%_]/g, "\\$&");
@@ -47,6 +70,7 @@ export async function listOrders({
   from,
   to,
   q,
+  kitchen,
   limit,
   offset,
 }) {
@@ -56,44 +80,45 @@ export async function listOrders({
 
   if (tenantId !== undefined) {
     params.push(tenantId);
-    conditions.push(`tenant_id = $${params.length}`);
+    conditions.push(`o.tenant_id = $${params.length}`);
   }
 
   if (branchId !== undefined) {
     params.push(branchId);
-    conditions.push(`foodtruck_id = $${params.length}`);
+    conditions.push(`o.foodtruck_id = $${params.length}`);
   }
 
   if (status !== undefined) {
     const statuses = Array.isArray(status) ? status : [status];
     params.push(statuses);
-    conditions.push(`status = ANY($${params.length}::varchar[])`);
+    conditions.push(`o.status = ANY($${params.length}::varchar[])`);
   }
 
   if (orderType !== undefined) {
-    params.push(orderType);
-    conditions.push(`order_type = $${params.length}`);
+    const orderTypes = Array.isArray(orderType) ? orderType : [orderType];
+    params.push(orderTypes);
+    conditions.push(`o.order_type = ANY($${params.length}::varchar[])`);
   }
 
   if (paymentStatus !== undefined) {
     params.push(paymentStatus);
-    conditions.push(`payment_status = $${params.length}`);
+    conditions.push(`o.payment_status = $${params.length}`);
   }
 
   if (paymentMethod !== undefined) {
     params.push(paymentMethod);
-    conditions.push(`payment_method = $${params.length}`);
+    conditions.push(`o.payment_method = $${params.length}`);
   }
 
   if (from !== undefined || to !== undefined) {
     if (from !== undefined) {
       params.push(new Date(from));
-      conditions.push(`created_at >= $${params.length}`);
+      conditions.push(`o.created_at >= $${params.length}`);
     }
 
     if (to !== undefined) {
       params.push(new Date(to));
-      conditions.push(`created_at <= $${params.length}`);
+      conditions.push(`o.created_at <= $${params.length}`);
     }
   }
 
@@ -101,16 +126,24 @@ export async function listOrders({
     const search = String(q).trim();
     const clauses = [];
     params.push(`%${escapeLike(search)}%`);
-    clauses.push(`client_contact ILIKE $${params.length}`);
+    clauses.push(`o.client_contact ILIKE $${params.length}`);
 
     const number = Number(search);
 
     if (Number.isInteger(number)) {
       params.push(number);
-      clauses.push(`number = $${params.length}`);
+      clauses.push(`o.number = $${params.length}`);
     }
 
     conditions.push(`(${clauses.join(" OR ")})`);
+  }
+
+  if (kitchen) {
+    // Cocina no ve los pedidos de la app del cliente (QR o domicilio) hasta que se cobran.
+    conditions.push(
+      `NOT ((o.order_type = 'qr' OR (o.order_type = 'delivery' AND o.delivery_address IS NOT NULL))
+        AND o.payment_status = 'pending')`
+    );
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -119,7 +152,7 @@ export async function listOrders({
   const offsetValue = offset ?? 0;
 
   const { rows } = await pool.query(
-    `SELECT * FROM orders ${where} ORDER BY created_at DESC
+    `${ORDER_SELECT} ${where} ORDER BY o.created_at DESC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, limitValue, offsetValue]
   );
@@ -139,11 +172,11 @@ export async function findOrderById(orderId, tenantId) {
 
   if (tenantId !== undefined) {
     params.push(tenantId);
-    tenantClause = `AND tenant_id = $${params.length}`;
+    tenantClause = `AND o.tenant_id = $${params.length}`;
   }
 
   const { rows } = await getPgPool().query(
-    `SELECT * FROM orders WHERE id = $1 ${tenantClause}`,
+    `${ORDER_SELECT} WHERE o.id = $1 ${tenantClause}`,
     params
   );
 
@@ -179,16 +212,19 @@ export async function updateOrderStatus(orderId, status, actorId) {
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
 }
 
-export async function createOrder(order) {
+export async function createOrder(order, client = getPgPool()) {
   const id = generateObjectIdHex();
-  const pool = getPgPool();
+  const pool = client;
 
   const { rows } = await pool.query(
     `INSERT INTO orders
        (id, tenant_id, foodtruck_id, number, status, order_type, payment_status,
         payment_method, client_contact, client_phone, client_name, points_awarded,
-        items, status_history, total)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        items, status_history, total, cash_session_id, paid_at, paid_by,
+        delivery_address, delivery_reference, delivery_lat, delivery_lng, delivery_accuracy_m,
+        delivery_distance_km, delivery_eta_minutes, delivery_out_of_range)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+             $19, $20, $21, $22, $23, $24, $25, $26)
      RETURNING *`,
     [
       id,
@@ -206,6 +242,17 @@ export async function createOrder(order) {
       JSON.stringify(order.items ?? []),
       JSON.stringify(order.statusHistory ?? []),
       order.total ?? 0,
+      order.cashSessionId ?? null,
+      order.cashSessionId ? new Date() : null,
+      order.cashSessionId && order.paidBy ? String(order.paidBy) : null,
+      order.deliveryAddress ?? null,
+      order.deliveryReference ?? null,
+      order.deliveryLat ?? null,
+      order.deliveryLng ?? null,
+      order.deliveryAccuracyM ?? null,
+      order.deliveryDistanceKm ?? null,
+      order.deliveryEtaMinutes ?? null,
+      order.deliveryOutOfRange ?? null,
     ]
   );
 
@@ -231,19 +278,58 @@ export async function updateOrderItems(orderId, items) {
   return rowToOrder(rows[0]);
 }
 
-export async function payOrder(orderId, paymentMethod) {
+function historyEntry(status, actorId) {
+  return JSON.stringify([{ status, at: new Date(), by: actorId ? String(actorId) : null }]);
+}
+
+/** Lee y bloquea el pedido dentro de una transacción. */
+export async function lockOrder(client, orderId) {
   const objectId = toOrderObjectId(orderId);
 
   if (!objectId) {
     return null;
   }
 
-  const { rows } = await getPgPool().query(
+  const { rows } = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [objectId]);
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+/** Marca como cobrado un pedido pendiente y lo asocia a la caja. */
+export async function markPaid(client, orderId, { paymentMethod, cashSessionId, paidBy }) {
+  const { rows } = await client.query(
     `UPDATE orders
-     SET payment_status = 'paid', payment_method = $2, updated_at = NOW()
-     WHERE id = $1 AND payment_status = 'pending'
+     SET payment_status = 'paid', payment_method = $2, cash_session_id = $3,
+         paid_at = NOW(), paid_by = $4, updated_at = NOW()
+     WHERE id = $1 AND payment_status = 'pending' AND status <> 'cancelled'
      RETURNING *`,
-    [objectId, paymentMethod]
+    [orderId, paymentMethod, cashSessionId, paidBy ? String(paidBy) : null]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+export async function markCancelled(client, orderId, { reason, actorId, refunded }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET status = 'cancelled',
+         payment_status = CASE WHEN $4 THEN 'refunded' ELSE payment_status END,
+         cancel_reason = $2, cancelled_by = $3, cancelled_at = NOW(), updated_at = NOW(),
+         status_history = status_history || $5::jsonb
+     WHERE id = $1
+     RETURNING *`,
+    [orderId, reason, actorId ? String(actorId) : null, Boolean(refunded), historyEntry("cancelled", actorId)]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+export async function replaceItems(client, orderId, { items, total, actorId }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET items = $2, total = $3, corrected_by = $4, corrected_at = NOW(), updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [orderId, JSON.stringify(items), total, actorId ? String(actorId) : null]
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
@@ -265,4 +351,52 @@ export async function updateOrderPointsAwarded(orderId) {
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+/** Tramos de distancia del reporte de delivery, en km. */
+export const DELIVERY_DISTANCE_BUCKETS = Object.freeze([
+  { key: "0-2", min: 0, max: 2 },
+  { key: "2-5", min: 2, max: 5 },
+  { key: "5-10", min: 5, max: 10 },
+  { key: "10+", min: 10, max: null },
+]);
+
+/**
+ * Pedidos a domicilio de un periodo con su estimación, para el reporte de análisis.
+ * Excluye los anulados.
+ */
+export async function listDeliveryOrders({ tenantId, branchId, from, to, limit = 500 }) {
+  const conditions = [`o.order_type = 'delivery'`, `o.status <> 'cancelled'`];
+  const params = [];
+
+  if (tenantId !== undefined) {
+    params.push(tenantId);
+    conditions.push(`o.tenant_id = $${params.length}`);
+  }
+
+  if (branchId !== undefined) {
+    params.push(branchId);
+    conditions.push(`o.foodtruck_id = $${params.length}`);
+  }
+
+  if (from !== undefined) {
+    params.push(new Date(from));
+    conditions.push(`o.created_at >= $${params.length}`);
+  }
+
+  if (to !== undefined) {
+    params.push(new Date(to));
+    conditions.push(`o.created_at <= $${params.length}`);
+  }
+
+  params.push(limit);
+
+  const { rows } = await getPgPool().query(
+    `${ORDER_SELECT}
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY o.created_at DESC
+     LIMIT $${params.length}`,
+    params
+  );
+
+  return rows.map(rowToOrder);
 }

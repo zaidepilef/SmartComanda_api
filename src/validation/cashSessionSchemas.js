@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { PAYMENT_METHODS } from "../utils/paymentMethods.js";
 
 const OBJECT_ID_PATTERN = /^[0-9a-fA-F]{24}$/;
 
@@ -20,10 +19,11 @@ export const closeCashSessionSchema = z.object({
       credit: z.number().nonnegative("closingAmount must be zero or greater.").optional(),
       transfer: z.number().nonnegative("closingAmount must be zero or greater.").optional(),
     })
-    .refine((amounts) => PAYMENT_METHODS.some((method) => amounts[method] !== undefined), {
+    .refine((amounts) => ["cash", "debit", "credit", "transfer"].some((method) => amounts[method] !== undefined), {
       message: "At least one closing amount must be provided.",
     })
     .optional(),
+  note: z.string().trim().max(500, "note must be at most 500 characters.").optional(),
 });
 
 export const closeCashSessionParamsSchema = z.object({

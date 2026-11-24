@@ -84,6 +84,93 @@ export async function payOrder(req, res) {
   }
 }
 
+/**
+ * @swagger
+ * /api/orders/{id}/cancel:
+ *   post:
+ *     summary: Anular un pedido
+ *     description: >
+ *       Solo Encargado (admin), owner o sysadmin. Exige motivo. Si el pedido estaba cobrado,
+ *       revierte su monto en la caja donde se cobró (409 si esa caja ya está cerrada).
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason: { type: string, maxLength: 200 }
+ *     responses:
+ *       200: { description: Pedido anulado }
+ *       400: { description: Falta el motivo }
+ *       403: { description: El rol no permite anular }
+ *       404: { description: Pedido no encontrado }
+ *       409: { description: Estado no anulable o caja de origen cerrada }
+ */
+export async function cancelOrder(req, res) {
+  try {
+    const order = await orderService.cancelOrder(req.user, req.params.id, req.body.reason);
+    return res.status(200).json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
+ * /api/orders/{id}/items:
+ *   put:
+ *     summary: Corregir los ítems de un pedido
+ *     description: >
+ *       Solo Encargado (admin), owner o sysadmin, y solo para pedidos sin cobrar que cocina
+ *       aún no empezó. Los precios se recalculan en el servidor.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [items]
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [dishId, quantity]
+ *                   properties:
+ *                     dishId: { type: string }
+ *                     quantity: { type: integer, minimum: 1 }
+ *     responses:
+ *       200: { description: Pedido corregido }
+ *       403: { description: El rol no permite corregir }
+ *       409: { description: El pedido ya se cobró o está en preparación }
+ */
+export async function correctOrder(req, res) {
+  try {
+    const order = await orderService.correctOrder(req.user, req.params.id, req.body.items);
+    return res.status(200).json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
 export async function listOrders(req, res) {
   try {
     const orders = await orderService.listOrders(req.user, req.validatedQuery);
@@ -110,6 +197,42 @@ export async function updateOrderStatus(req, res) {
       req.body.status
     );
     return res.status(200).json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
+ * /api/orders/delivery-analytics:
+ *   get:
+ *     summary: Reporte de análisis de delivery
+ *     description: >
+ *       Pedidos a domicilio del periodo con distancia, minutos estimados y fuera de rango,
+ *       más totales y tramos de distancia. Solo Encargado, owner y sysadmin.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: branchId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date-time }
+ *     responses:
+ *       200:
+ *         description: Reporte de delivery
+ *       403:
+ *         description: El rol no permite ver el reporte
+ */
+export async function getDeliveryAnalytics(req, res) {
+  try {
+    const result = await orderService.getDeliveryAnalytics(req.user, req.validatedQuery);
+    return res.json(result);
   } catch (error) {
     return handleError(res, error);
   }
