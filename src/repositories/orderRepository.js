@@ -6,6 +6,8 @@ export function toOrderObjectId(id) {
   return toObjectIdHex(id);
 }
 
+const numberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
+
 export function rowToOrder(row) {
   if (!row) {
     return null;
@@ -37,6 +39,14 @@ export function rowToOrder(row) {
     cancelledAt: row.cancelled_at ?? null,
     correctedBy: row.corrected_by ?? null,
     correctedAt: row.corrected_at ?? null,
+    deliveryAddress: row.delivery_address ?? null,
+    deliveryReference: row.delivery_reference ?? null,
+    deliveryLat: numberOrNull(row.delivery_lat),
+    deliveryLng: numberOrNull(row.delivery_lng),
+    deliveryAccuracyM: numberOrNull(row.delivery_accuracy_m),
+    deliveryDistanceKm: numberOrNull(row.delivery_distance_km),
+    deliveryEtaMinutes: numberOrNull(row.delivery_eta_minutes),
+    deliveryOutOfRange: row.delivery_out_of_range ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -85,8 +95,9 @@ export async function listOrders({
   }
 
   if (orderType !== undefined) {
-    params.push(orderType);
-    conditions.push(`o.order_type = $${params.length}`);
+    const orderTypes = Array.isArray(orderType) ? orderType : [orderType];
+    params.push(orderTypes);
+    conditions.push(`o.order_type = ANY($${params.length}::varchar[])`);
   }
 
   if (paymentStatus !== undefined) {
@@ -128,8 +139,11 @@ export async function listOrders({
   }
 
   if (kitchen) {
-    // Cocina no ve pedidos QR hasta que se cobran.
-    conditions.push(`NOT (o.order_type = 'qr' AND o.payment_status = 'pending')`);
+    // Cocina no ve los pedidos de la app del cliente (QR o domicilio) hasta que se cobran.
+    conditions.push(
+      `NOT ((o.order_type = 'qr' OR (o.order_type = 'delivery' AND o.delivery_address IS NOT NULL))
+        AND o.payment_status = 'pending')`
+    );
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -206,8 +220,11 @@ export async function createOrder(order, client = getPgPool()) {
     `INSERT INTO orders
        (id, tenant_id, foodtruck_id, number, status, order_type, payment_status,
         payment_method, client_contact, client_phone, client_name, points_awarded,
-        items, status_history, total, cash_session_id, paid_at, paid_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        items, status_history, total, cash_session_id, paid_at, paid_by,
+        delivery_address, delivery_reference, delivery_lat, delivery_lng, delivery_accuracy_m,
+        delivery_distance_km, delivery_eta_minutes, delivery_out_of_range)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+             $19, $20, $21, $22, $23, $24, $25, $26)
      RETURNING *`,
     [
       id,
@@ -228,6 +245,14 @@ export async function createOrder(order, client = getPgPool()) {
       order.cashSessionId ?? null,
       order.cashSessionId ? new Date() : null,
       order.cashSessionId && order.paidBy ? String(order.paidBy) : null,
+      order.deliveryAddress ?? null,
+      order.deliveryReference ?? null,
+      order.deliveryLat ?? null,
+      order.deliveryLng ?? null,
+      order.deliveryAccuracyM ?? null,
+      order.deliveryDistanceKm ?? null,
+      order.deliveryEtaMinutes ?? null,
+      order.deliveryOutOfRange ?? null,
     ]
   );
 
@@ -326,4 +351,52 @@ export async function updateOrderPointsAwarded(orderId) {
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+/** Tramos de distancia del reporte de delivery, en km. */
+export const DELIVERY_DISTANCE_BUCKETS = Object.freeze([
+  { key: "0-2", min: 0, max: 2 },
+  { key: "2-5", min: 2, max: 5 },
+  { key: "5-10", min: 5, max: 10 },
+  { key: "10+", min: 10, max: null },
+]);
+
+/**
+ * Pedidos a domicilio de un periodo con su estimación, para el reporte de análisis.
+ * Excluye los anulados.
+ */
+export async function listDeliveryOrders({ tenantId, branchId, from, to, limit = 500 }) {
+  const conditions = [`o.order_type = 'delivery'`, `o.status <> 'cancelled'`];
+  const params = [];
+
+  if (tenantId !== undefined) {
+    params.push(tenantId);
+    conditions.push(`o.tenant_id = $${params.length}`);
+  }
+
+  if (branchId !== undefined) {
+    params.push(branchId);
+    conditions.push(`o.foodtruck_id = $${params.length}`);
+  }
+
+  if (from !== undefined) {
+    params.push(new Date(from));
+    conditions.push(`o.created_at >= $${params.length}`);
+  }
+
+  if (to !== undefined) {
+    params.push(new Date(to));
+    conditions.push(`o.created_at <= $${params.length}`);
+  }
+
+  params.push(limit);
+
+  const { rows } = await getPgPool().query(
+    `${ORDER_SELECT}
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY o.created_at DESC
+     LIMIT $${params.length}`,
+    params
+  );
+
+  return rows.map(rowToOrder);
 }

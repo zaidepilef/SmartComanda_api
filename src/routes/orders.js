@@ -11,6 +11,7 @@ import { createOrderSchema } from "../validation/orderSchemas.js";
 import {
   cancelOrderSchema,
   correctOrderSchema,
+  deliveryAnalyticsQuerySchema,
   getOrderParamsSchema,
   listOrdersQuerySchema,
   payOrderSchema,
@@ -33,6 +34,12 @@ router.get(
   requirePermission("order.read"),
   validateQuery(listOrdersQuerySchema),
   orderController.listOrders
+);
+router.get(
+  "/delivery-analytics",
+  requirePermission("order.analytics"),
+  validateQuery(deliveryAnalyticsQuerySchema),
+  orderController.getDeliveryAnalytics
 );
 router.get("/:id", requirePermission("order.read"), orderParams, orderController.getOrder);
 router.patch(

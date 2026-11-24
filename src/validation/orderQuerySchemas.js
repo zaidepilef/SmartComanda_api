@@ -27,7 +27,7 @@ export const listOrdersQuerySchema = z.object({
 
       return Array.isArray(value) ? value : [value];
     }),
-  orderType: z.enum(ORDER_TYPES).optional(),
+  orderType: z.union([z.enum(ORDER_TYPES), z.array(z.enum(ORDER_TYPES))]).optional(),
   paymentStatus: z.enum(ORDER_PAYMENT_STATUSES_LIST).optional(),
   paymentMethod: z.enum(PAYMENT_METHODS).optional(),
   from: z.string().datetime({ offset: true }).optional(),
@@ -82,4 +82,17 @@ export const correctOrderSchema = z.strictObject({
     )
     .min(1, "items must have at least one dish.")
     .max(50),
+});
+
+export const deliveryAnalyticsQuerySchema = z.object({
+  tenantId: z
+    .string()
+    .regex(OBJECT_ID_PATTERN, "tenantId must be a valid ObjectId.")
+    .optional(),
+  branchId: z
+    .string()
+    .regex(OBJECT_ID_PATTERN, "branchId must be a valid ObjectId.")
+    .optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
 });

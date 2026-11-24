@@ -13,6 +13,7 @@ import {
   ORDER_PAYMENT_STATUSES,
   ORDER_STATUSES,
   ORDER_STATUS_TRANSITIONS,
+  isCustomerAppOrder,
 } from "../models/order.js";
 import { USER_ROLES } from "../models/user.js";
 import { withTransaction } from "../db/postgres.js";
@@ -162,11 +163,11 @@ export async function updateOrderStatus(actor, orderId, status) {
   }
 
   if (
-    order.orderType === "qr" &&
+    isCustomerAppOrder(order) &&
     order.paymentStatus === ORDER_PAYMENT_STATUSES.PENDING &&
     status === ORDER_STATUSES.PREPARING
   ) {
-    throw new ConflictError("QR orders must be charged before the kitchen starts them.");
+    throw new ConflictError("Customer app orders must be charged before the kitchen starts them.");
   }
 
   const updated = await orderRepository.updateOrderStatus(orderId, status, actor._id);
@@ -615,4 +616,88 @@ async function createOrderDocument(
       },
     ],
   }, client);
+}
+/** Resume los pedidos a domicilio: promedios, % fuera de rango y tramos de distancia. */
+export function summarizeDeliveryOrders(orders) {
+  const withEstimate = orders.filter((order) => order.deliveryDistanceKm !== null);
+  const average = (values) =>
+    values.length === 0
+      ? null
+      : Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100;
+
+  const buckets = orderRepository.DELIVERY_DISTANCE_BUCKETS.map((bucket) => ({
+    key: bucket.key,
+    count: withEstimate.filter(
+      (order) =>
+        order.deliveryDistanceKm >= bucket.min &&
+        (bucket.max === null || order.deliveryDistanceKm < bucket.max)
+    ).length,
+  }));
+
+  const outOfRange = withEstimate.filter((order) => order.deliveryOutOfRange).length;
+
+  return {
+    totalOrders: orders.length,
+    withEstimate: withEstimate.length,
+    avgDistanceKm: average(withEstimate.map((order) => order.deliveryDistanceKm)),
+    avgEtaMinutes: average(withEstimate.map((order) => order.deliveryEtaMinutes)),
+    outOfRangeCount: outOfRange,
+    outOfRangePct:
+      withEstimate.length === 0 ? null : Math.round((outOfRange / withEstimate.length) * 1000) / 10,
+    buckets,
+  };
+}
+
+/** Reporte de análisis de delivery por sucursal y periodo (ver spec delivery-analytics). */
+export async function getDeliveryAnalytics(actor, query = {}) {
+  assertTenantActor(actor);
+
+  const tenantId = isGlobalActor(actor) ? query.tenantId : actor.tenantId;
+  let branch = null;
+
+  if (query.branchId !== undefined) {
+    branch = await branchRepository.findBranchById(query.branchId);
+
+    if (!branch || (!isGlobalActor(actor) && String(branch.tenantId) !== String(actor.tenantId))) {
+      throw new BadRequestError("Branch not found in your tenant.");
+    }
+  }
+
+  const orders = await orderRepository.listDeliveryOrders({
+    tenantId,
+    branchId: query.branchId,
+    from: query.from,
+    to: query.to,
+  });
+
+  return {
+    branch: branch
+      ? {
+          _id: branch._id,
+          name: branch.name,
+          lat: branch.lat,
+          lng: branch.lng,
+          deliveryMaxKm: branch.deliveryMaxKm,
+          deliveryMaxMinutes: branch.deliveryMaxMinutes,
+          deliveryAvgSpeedKmh: branch.deliveryAvgSpeedKmh,
+        }
+      : null,
+    summary: summarizeDeliveryOrders(orders),
+    orders: orders.map((order) => ({
+      _id: order._id,
+      number: order.number,
+      createdAt: order.createdAt,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      clientName: order.clientName,
+      total: order.total,
+      deliveryAddress: order.deliveryAddress,
+      deliveryReference: order.deliveryReference,
+      deliveryLat: order.deliveryLat,
+      deliveryLng: order.deliveryLng,
+      deliveryDistanceKm: order.deliveryDistanceKm,
+      deliveryEtaMinutes: order.deliveryEtaMinutes,
+      deliveryOutOfRange: order.deliveryOutOfRange,
+    })),
+  };
 }

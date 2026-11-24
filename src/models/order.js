@@ -35,6 +35,17 @@ export const ORDER_PAYMENT_STATUSES_LIST = Object.freeze(
 
 export const ORDER_TYPES = Object.freeze(["takeaway", "dinein", "delivery", "qr"]);
 
+/**
+ * Pedido hecho por el cliente desde su teléfono: QR (retiro) o domicilio con
+ * dirección. Se cobra en caja antes de pasar a cocina.
+ */
+export function isCustomerAppOrder(order) {
+  return (
+    order.orderType === "qr" ||
+    (order.orderType === "delivery" && Boolean(order.deliveryAddress))
+  );
+}
+
 export function toOrderDocument(order) {
   const now = new Date();
 

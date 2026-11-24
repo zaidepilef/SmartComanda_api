@@ -20,6 +20,7 @@ export const PERMISSIONS = Object.freeze({
   "order.status": ALL_STAFF,
   "order.cancel": MANAGERS,
   "order.correct": MANAGERS,
+  "order.analytics": MANAGERS,
   "user.manage": MANAGERS,
 });
 

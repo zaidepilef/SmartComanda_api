@@ -201,3 +201,39 @@ export async function updateOrderStatus(req, res) {
     return handleError(res, error);
   }
 }
+
+/**
+ * @swagger
+ * /api/orders/delivery-analytics:
+ *   get:
+ *     summary: Reporte de análisis de delivery
+ *     description: >
+ *       Pedidos a domicilio del periodo con distancia, minutos estimados y fuera de rango,
+ *       más totales y tramos de distancia. Solo Encargado, owner y sysadmin.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: branchId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: from
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: to
+ *         schema: { type: string, format: date-time }
+ *     responses:
+ *       200:
+ *         description: Reporte de delivery
+ *       403:
+ *         description: El rol no permite ver el reporte
+ */
+export async function getDeliveryAnalytics(req, res) {
+  try {
+    const result = await orderService.getDeliveryAnalytics(req.user, req.validatedQuery);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}

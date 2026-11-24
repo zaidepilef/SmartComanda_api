@@ -6,6 +6,7 @@ import { validateBody, validateQuery } from "../middleware/validation.js";
 import {
   createPublicOrderSchema,
   customerBalanceQuerySchema,
+  deliveryEstimateSchema,
   publicMenuQuerySchema,
 } from "../validation/publicSchemas.js";
 
@@ -23,6 +24,11 @@ router.post(
   trackOrderOutcome,
   validateBody(createPublicOrderSchema),
   publicController.createPublicOrder
+);
+router.post(
+  "/delivery-estimate",
+  validateBody(deliveryEstimateSchema),
+  publicController.getDeliveryEstimate
 );
 router.get(
   "/customers/balance",
