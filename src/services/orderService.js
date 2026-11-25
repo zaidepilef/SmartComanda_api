@@ -5,15 +5,19 @@ import * as ingredientRepository from "../repositories/ingredientRepository.js";
 import * as movementRepository from "../repositories/movementRepository.js";
 import * as orderRepository from "../repositories/orderRepository.js";
 import * as stockRepository from "../repositories/stockRepository.js";
+import * as userRepository from "../repositories/userRepository.js";
 import * as inventoryService from "./inventoryService.js";
 import * as fifoService from "./fifoService.js";
 import * as loyaltyService from "./loyaltyService.js";
 import {
   CANCELLABLE_STATUSES,
+  COLLECTABLE_PAYMENT_STATUSES,
   ORDER_PAYMENT_STATUSES,
   ORDER_STATUSES,
-  ORDER_STATUS_TRANSITIONS,
+  isAppDeliveryOrder,
+  isAppPickupOrder,
   isCustomerAppOrder,
+  nextStatuses,
 } from "../models/order.js";
 import { USER_ROLES } from "../models/user.js";
 import { withTransaction } from "../db/postgres.js";
@@ -113,9 +117,15 @@ export async function listOrders(actor, query = {}) {
     }
   }
 
+  // El repartidor solo ve domicilios de la app, y en reparto solo los suyos.
+  const isDriverOnly =
+    actorRoles(actor).includes(USER_ROLES.DRIVER) && !can(actor, "order.status");
+
   return orderRepository.listOrders({
     tenantId,
     branchId,
+    appDeliveryOnly: isDriverOnly ? true : query.appDeliveryOnly,
+    driverId: isDriverOnly ? String(actor._id) : undefined,
     status: query.status,
     orderType: query.orderType,
     paymentStatus: query.paymentStatus,
@@ -143,31 +153,40 @@ export async function getOrder(actor, orderId) {
   return order;
 }
 
+/** Estados que tienen su propio endpoint (con motivo, repartidor o cobro). */
+const DEDICATED_STATUS_ENDPOINTS = Object.freeze({
+  [ORDER_STATUSES.CANCELLED]: "POST /api/orders/:id/cancel",
+  [ORDER_STATUSES.REJECTED]: "POST /api/orders/:id/reject",
+  [ORDER_STATUSES.OUT_FOR_DELIVERY]: "POST /api/orders/:id/dispatch",
+});
+
 export async function updateOrderStatus(actor, orderId, status) {
   const order = await getOrder(actor, orderId);
 
-  if (status === ORDER_STATUSES.CANCELLED) {
-    if (!can(actor, "order.cancel")) {
-      throw new ForbiddenError("Forbidden. Your role cannot cancel orders.");
-    }
-
-    throw new BadRequestError("Use POST /api/orders/:id/cancel with a reason to cancel an order.");
+  if (status === ORDER_STATUSES.CANCELLED && !can(actor, "order.cancel")) {
+    throw new ForbiddenError("Forbidden. Your role cannot cancel orders.");
   }
 
-  const allowed = ORDER_STATUS_TRANSITIONS[order.status] ?? [];
+  if (DEDICATED_STATUS_ENDPOINTS[status]) {
+    throw new BadRequestError(`Use ${DEDICATED_STATUS_ENDPOINTS[status]} for this change.`);
+  }
 
-  if (!allowed.includes(status)) {
+  if (order.status === ORDER_STATUSES.OUT_FOR_DELIVERY) {
+    throw new ConflictError("Use POST /api/orders/:id/deliver to collect and deliver this order.");
+  }
+
+  if (!nextStatuses(order).includes(status)) {
     throw new ConflictError(
       `Cannot transition order from "${order.status}" to "${status}".`
     );
   }
 
   if (
-    isCustomerAppOrder(order) &&
-    order.paymentStatus === ORDER_PAYMENT_STATUSES.PENDING &&
+    isAppPickupOrder(order) &&
+    order.paymentStatus !== ORDER_PAYMENT_STATUSES.PAID &&
     status === ORDER_STATUSES.PREPARING
   ) {
-    throw new ConflictError("Customer app orders must be charged before the kitchen starts them.");
+    throw new ConflictError("Pickup orders from the app must be charged before the kitchen starts them.");
   }
 
   const updated = await orderRepository.updateOrderStatus(orderId, status, actor._id);
@@ -197,16 +216,25 @@ async function resolveBranchPaymentMethod(branchId, paymentMethod) {
 
 export async function payOrder(actor, orderId, paymentMethod) {
   const order = await getOrder(actor, orderId);
+
+  if (isAppDeliveryOrder(order)) {
+    throw new ConflictError("App delivery orders are collected by the driver on delivery.");
+  }
+
   const branch = await resolveBranchPaymentMethod(order.foodtruckId, paymentMethod);
 
   const paid = await withTransaction(async (client) => {
     const locked = await orderRepository.lockOrder(client, orderId);
 
-    if (!locked || locked.status === ORDER_STATUSES.CANCELLED) {
-      throw new ConflictError("Cancelled orders cannot be paid.");
+    if (
+      !locked ||
+      locked.status === ORDER_STATUSES.CANCELLED ||
+      locked.status === ORDER_STATUSES.REJECTED
+    ) {
+      throw new ConflictError("Cancelled or rejected orders cannot be paid.");
     }
 
-    if (locked.paymentStatus !== ORDER_PAYMENT_STATUSES.PENDING) {
+    if (!COLLECTABLE_PAYMENT_STATUSES.includes(locked.paymentStatus)) {
       throw new ConflictError("Only pending orders can be paid.");
     }
 
@@ -284,6 +312,207 @@ export async function cancelOrder(actor, orderId, reason) {
       actorId: actor._id,
       refunded: wasPaid,
     });
+  });
+}
+
+/**
+ * El local rechaza un pedido de la app antes de prepararlo, con un motivo que
+ * verá el cliente en el seguimiento.
+ */
+export async function rejectOrder(actor, orderId, reason) {
+  await getOrder(actor, orderId);
+
+  return withTransaction(async (client) => {
+    const order = await orderRepository.lockOrder(client, orderId);
+
+    if (!isCustomerAppOrder(order)) {
+      throw new ConflictError("Only orders placed from the customer app can be rejected.");
+    }
+
+    if (order.status !== ORDER_STATUSES.NEW) {
+      throw new ConflictError("Only new orders can be rejected; cancel it instead.");
+    }
+
+    if (order.paymentStatus === ORDER_PAYMENT_STATUSES.PAID) {
+      throw new ConflictError("Paid orders cannot be rejected; cancel it instead.");
+    }
+
+    return orderRepository.markRejected(client, order._id, { reason, actorId: actor._id });
+  });
+}
+
+function isManager(actor) {
+  return actorRoles(actor).some((role) => MANAGER_ROLES.includes(role));
+}
+
+/** Un repartidor solo opera los pedidos que tiene asignados. */
+function assertDriverOwnsOrder(actor, order) {
+  if (!isManager(actor) && String(order.driverId) !== String(actor._id)) {
+    throw new ForbiddenError("Forbidden. This delivery is assigned to another driver.");
+  }
+}
+
+async function resolveDriver(order, driverId) {
+  const driver = await userRepository.findUserById(driverId);
+
+  if (
+    !driver ||
+    driver.status !== "active" ||
+    !driver.roles.includes(USER_ROLES.DRIVER) ||
+    String(driver.tenantId) !== String(order.tenantId) ||
+    (driver.branchId && String(driver.branchId) !== String(order.foodtruckId))
+  ) {
+    throw new BadRequestError("Driver not found in this branch.");
+  }
+
+  return driver;
+}
+
+/**
+ * Sale a reparto un domicilio listo. El repartidor se lo asigna a sí mismo; un
+ * Encargado o superior puede indicar el repartidor.
+ */
+export async function dispatchOrder(actor, orderId, { driverId } = {}) {
+  const order = await getOrder(actor, orderId);
+
+  if (!isAppDeliveryOrder(order)) {
+    throw new ConflictError("Only app delivery orders go out for delivery.");
+  }
+
+  let assignedDriverId = actor._id;
+
+  if (driverId !== undefined) {
+    if (!can(actor, "order.assign")) {
+      throw new ForbiddenError("Forbidden. Your role cannot assign drivers.");
+    }
+
+    assignedDriverId = (await resolveDriver(order, driverId))._id;
+  }
+
+  return withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, orderId);
+
+    if (locked.status !== ORDER_STATUSES.READY) {
+      throw new ConflictError("Only ready orders can go out for delivery.");
+    }
+
+    return orderRepository.setStatus(client, locked._id, {
+      status: ORDER_STATUSES.OUT_FOR_DELIVERY,
+      actorId: actor._id,
+      driverId: assignedDriverId,
+    });
+  });
+}
+
+/** Encargado o superior reasigna el repartidor de un domicilio listo o en reparto. */
+export async function assignDriver(actor, orderId, driverId) {
+  const order = await getOrder(actor, orderId);
+  const driver = await resolveDriver(order, driverId);
+
+  return withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, orderId);
+
+    if (![ORDER_STATUSES.READY, ORDER_STATUSES.OUT_FOR_DELIVERY].includes(locked.status)) {
+      throw new ConflictError("Only ready or out-for-delivery orders can be reassigned.");
+    }
+
+    return orderRepository.setDriver(client, locked._id, {
+      driverId: driver._id,
+      actorId: actor._id,
+    });
+  });
+}
+
+/**
+ * Cobro con entrega: en una transacción registra el pago en la caja abierta de
+ * la sucursal y marca el pedido como entregado.
+ */
+export async function deliverOrder(actor, orderId, { paymentMethod, cashReceived }) {
+  const order = await getOrder(actor, orderId);
+
+  if (!isAppDeliveryOrder(order)) {
+    throw new ConflictError("Only app delivery orders are collected on delivery.");
+  }
+
+  assertDriverOwnsOrder(actor, order);
+  const branch = await resolveBranchPaymentMethod(order.foodtruckId, paymentMethod);
+
+  const delivered = await withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, orderId);
+
+    if (locked.status !== ORDER_STATUSES.OUT_FOR_DELIVERY) {
+      throw new ConflictError("Only orders out for delivery can be delivered.");
+    }
+
+    if (!COLLECTABLE_PAYMENT_STATUSES.includes(locked.paymentStatus)) {
+      throw new ConflictError("This order is already paid or voided.");
+    }
+
+    const total = round(locked.total);
+
+    if (paymentMethod === "cash" && !(cashReceived >= total)) {
+      throw new BadRequestError("cashReceived must cover the order total.");
+    }
+
+    const session = await cashSessionRepository.lockOpenByBranch(client, branch._id, locked.tenantId);
+
+    if (!session) {
+      throw new ConflictError("No open cash session for this branch. Ask the manager to open it.");
+    }
+
+    await orderRepository.markPaid(client, locked._id, {
+      paymentMethod,
+      cashSessionId: session.id,
+      paidBy: actor._id,
+      note: "collected_on_delivery",
+    });
+
+    await cashSessionRepository.recordSale(client, session.id, {
+      method: paymentMethod,
+      amount: total,
+      count: 1,
+    });
+
+    return orderRepository.setStatus(client, locked._id, {
+      status: ORDER_STATUSES.DELIVERED,
+      actorId: actor._id,
+    });
+  });
+
+  const result = {
+    order: delivered,
+    change: paymentMethod === "cash" ? round(cashReceived - delivered.total) : 0,
+  };
+
+  const pointsEarned = await loyaltyService.awardForOrder(delivered, {
+    tenantId: delivered.tenantId,
+    branchId: branch._id,
+  });
+
+  if (pointsEarned !== null) {
+    result.pointsEarned = pointsEarned;
+  }
+
+  return result;
+}
+
+/** El cobro con tarjeta fue rechazado en la puerta; el pedido sigue en reparto. */
+export async function declinePayment(actor, orderId, note) {
+  const order = await getOrder(actor, orderId);
+  assertDriverOwnsOrder(actor, order);
+
+  return withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, orderId);
+
+    if (locked.status !== ORDER_STATUSES.OUT_FOR_DELIVERY) {
+      throw new ConflictError("Only orders out for delivery can record a declined payment.");
+    }
+
+    if (!COLLECTABLE_PAYMENT_STATUSES.includes(locked.paymentStatus)) {
+      throw new ConflictError("This order is already paid or voided.");
+    }
+
+    return orderRepository.markPaymentDeclined(client, locked._id, { actorId: actor._id, note });
   });
 }
 

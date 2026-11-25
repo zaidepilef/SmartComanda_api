@@ -67,3 +67,92 @@ export async function incrementBalance(customerId, points) {
 
   return rows.length > 0 ? rowToCustomer(rows[0]) : null;
 }
+const numberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
+
+export function rowToAddress(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    _id: row.id,
+    id: row.id,
+    tenantId: row.tenant_id,
+    customerId: row.customer_id,
+    address: row.address,
+    reference: row.reference ?? null,
+    lat: numberOrNull(row.lat),
+    lng: numberOrNull(row.lng),
+    lastUsedAt: row.last_used_at,
+    createdAt: row.created_at,
+  };
+}
+
+/** Direcciones del cliente, la más usada recientemente primero. */
+export async function listAddresses(customerId) {
+  const { rows } = await getPgPool().query(
+    `SELECT * FROM customer_addresses WHERE customer_id = $1 ORDER BY last_used_at DESC, created_at DESC`,
+    [toObjectIdHex(customerId)]
+  );
+
+  return rows.map(rowToAddress);
+}
+
+export async function findAddressForCustomer(addressId, customerId) {
+  const objectId = toObjectIdHex(addressId);
+
+  if (!objectId) {
+    return null;
+  }
+
+  const { rows } = await getPgPool().query(
+    `SELECT * FROM customer_addresses WHERE id = $1 AND customer_id = $2`,
+    [objectId, toObjectIdHex(customerId)]
+  );
+
+  return rows.length > 0 ? rowToAddress(rows[0]) : null;
+}
+
+export async function insertAddress(address) {
+  const { rows } = await getPgPool().query(
+    `INSERT INTO customer_addresses (id, tenant_id, customer_id, address, reference, lat, lng)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      generateObjectIdHex(),
+      toObjectIdHex(address.tenantId),
+      toObjectIdHex(address.customerId),
+      address.address,
+      address.reference ?? null,
+      address.lat,
+      address.lng,
+    ]
+  );
+
+  return rowToAddress(rows[0]);
+}
+
+/** Marca la dirección como usada ahora y actualiza la referencia si viene una. */
+export async function touchAddress(addressId, { reference } = {}) {
+  const { rows } = await getPgPool().query(
+    `UPDATE customer_addresses
+     SET last_used_at = NOW(), reference = COALESCE($2, reference)
+     WHERE id = $1
+     RETURNING *`,
+    [toObjectIdHex(addressId), reference ?? null]
+  );
+
+  return rows.length > 0 ? rowToAddress(rows[0]) : null;
+}
+
+/** Deja solo las `keep` direcciones usadas más recientemente. */
+export async function pruneAddresses(customerId, keep) {
+  await getPgPool().query(
+    `DELETE FROM customer_addresses
+     WHERE customer_id = $1 AND id NOT IN (
+       SELECT id FROM customer_addresses WHERE customer_id = $1
+       ORDER BY last_used_at DESC, created_at DESC LIMIT $2
+     )`,
+    [toObjectIdHex(customerId), keep]
+  );
+}

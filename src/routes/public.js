@@ -1,11 +1,16 @@
 import { Router } from "express";
 import * as publicController from "../controllers/publicController.js";
-import { publicRateLimit } from "../middleware/rateLimit.js";
+import {
+  customerLookupIpRateLimit,
+  customerLookupPhoneRateLimit,
+  publicRateLimit,
+} from "../middleware/rateLimit.js";
 import { trackOrderOutcome } from "../middleware/trackOrderOutcome.js";
 import { validateBody, validateQuery } from "../middleware/validation.js";
 import {
   createPublicOrderSchema,
   customerBalanceQuerySchema,
+  customerLookupSchema,
   deliveryEstimateSchema,
   publicMenuQuerySchema,
 } from "../validation/publicSchemas.js";
@@ -24,6 +29,13 @@ router.post(
   trackOrderOutcome,
   validateBody(createPublicOrderSchema),
   publicController.createPublicOrder
+);
+router.post(
+  "/customers/lookup",
+  customerLookupIpRateLimit,
+  customerLookupPhoneRateLimit,
+  validateBody(customerLookupSchema),
+  publicController.lookupCustomer
 );
 router.post(
   "/delivery-estimate",

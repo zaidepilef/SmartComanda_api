@@ -9,6 +9,12 @@ export const JOURNEY_EVENT_TYPES = Object.freeze({
   ORDER_SUBMITTED: "order_submitted",
   ORDER_CREATED: "order_created",
   ORDER_FAILED: "order_failed",
+  // Pasos del flujo de compra (customer-purchase-flow), sin datos personales.
+  MODE_SELECTED: "mode_selected",
+  CUSTOMER_LOOKED_UP: "customer_looked_up",
+  ADDRESS_CONFIRMED: "address_confirmed",
+  ADDRESS_OUT_OF_RANGE: "address_out_of_range",
+  SUMMARY_OPENED: "summary_opened",
 });
 
 export const JOURNEY_EVENT_SOURCES = Object.freeze({
