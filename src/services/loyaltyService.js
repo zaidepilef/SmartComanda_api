@@ -2,7 +2,7 @@ import * as tenantRepository from "../repositories/tenantRepository.js";
 import * as customerRepository from "../repositories/customerRepository.js";
 import * as loyaltyRepository from "../repositories/loyaltyRepository.js";
 import * as orderRepository from "../repositories/orderRepository.js";
-import { ORDER_STATUSES } from "../models/order.js";
+import { ORDER_STATUSES, isCustomerAppOrder } from "../models/order.js";
 
 export async function getRule(tenantId) {
   const tenant = await tenantRepository.findTenantById(tenantId);
@@ -31,7 +31,7 @@ async function claimOrder(orderId) {
 
 export async function awardForOrder(order, { tenantId, branchId }) {
   if (
-    order?.orderType !== "qr" ||
+    !isCustomerAppOrder(order) ||
     !order?.clientPhone ||
     order?.status === ORDER_STATUSES.CANCELLED
   ) {

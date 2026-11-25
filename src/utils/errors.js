@@ -39,3 +39,12 @@ export class ForbiddenError extends DomainError {
     this.name = "ForbiddenError";
   }
 }
+
+/** Petición válida que la regla de negocio no permite (HTTP 422) con un código estable. */
+export class UnprocessableError extends DomainError {
+  constructor(message, code) {
+    super(message);
+    this.name = "UnprocessableError";
+    this.code = code;
+  }
+}
