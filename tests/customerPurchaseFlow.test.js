@@ -15,6 +15,7 @@ import { can } from "../src/utils/permissions.js";
 import { normalizeChileanMobile, normalizeLegacyPhone } from "../src/utils/phone.js";
 import { customerFacingStatus, nextStatuses } from "../src/models/order.js";
 import { createPublicOrderSchema } from "../src/validation/publicSchemas.js";
+import { deliverOrderSchema } from "../src/validation/orderQuerySchemas.js";
 import { generateObjectIdHex } from "../src/utils/id.js";
 
 const BRANCH_POINT = { lat: -33.4378, lng: -70.6504 };
@@ -455,6 +456,58 @@ test("declined card at the door, then paid in cash: payment history keeps both",
     ["pending", "declined", "paid"]
   );
   assert.equal(order.paymentHistory[2].method, "cash");
+});
+
+test("deliver: an order paid at the register before dispatch is delivered without charging again", async () => {
+  const ctx = await setup();
+  const cook = await ctx.user("cook");
+  const driver = await ctx.user("driver");
+  const created = await readyDelivery(ctx, cook);
+  await orderService.dispatchOrder(driver, created.orderId);
+  // Cobro en caja del flujo anterior: hoy la caja ya no puede cobrar domicilios.
+  await getPgPool().query(
+    "UPDATE orders SET payment_status = 'paid', payment_method = 'transfer', paid_at = NOW() WHERE id = $1",
+    [created.orderId]
+  );
+
+  // Sin caja abierta y sin medio de pago.
+  const result = await orderService.deliverOrder(driver, created.orderId, {});
+  assert.equal(result.order.status, "delivered");
+  assert.equal(result.order.paymentStatus, "paid");
+  assert.equal(result.order.paymentMethod, "transfer");
+  assert.equal(result.order.cashSessionId ?? null, null);
+  assert.equal(result.change, 0);
+
+  await assert.rejects(
+    orderService.deliverOrder(driver, created.orderId, {}),
+    (error) => error.name === "ConflictError"
+  );
+});
+
+test("deliver: an unpaid order needs a method; a voided one cannot be delivered", async () => {
+  const ctx = await setup();
+  const cook = await ctx.user("cook");
+  const driver = await ctx.user("driver");
+  const created = await readyDelivery(ctx, cook);
+  await orderService.dispatchOrder(driver, created.orderId);
+
+  await assert.rejects(
+    orderService.deliverOrder(driver, created.orderId, {}),
+    (error) => error.name === "BadRequestError"
+  );
+
+  await getPgPool().query("UPDATE orders SET payment_status = 'voided' WHERE id = $1", [created.orderId]);
+  await assert.rejects(
+    orderService.deliverOrder(driver, created.orderId, { paymentMethod: "debit" }),
+    (error) => error.name === "ConflictError"
+  );
+});
+
+test("schema: deliver accepts no method, but cash still needs cashReceived", () => {
+  assert.equal(deliverOrderSchema.safeParse({}).success, true);
+  assert.equal(deliverOrderSchema.safeParse({ paymentMethod: "debit" }).success, true);
+  assert.equal(deliverOrderSchema.safeParse({ paymentMethod: "cash" }).success, false);
+  assert.equal(deliverOrderSchema.safeParse({ paymentMethod: "transfer" }).success, false);
 });
 
 // ── Seguimiento ──────────────────────────────────────────────────────

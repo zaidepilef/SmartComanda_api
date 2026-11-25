@@ -435,6 +435,16 @@ export async function deliverOrder(actor, orderId, { paymentMethod, cashReceived
   }
 
   assertDriverOwnsOrder(actor, order);
+
+  // Domicilios cobrados en caja antes de existir el cobro contra entrega: solo se entregan.
+  if (order.paymentStatus === ORDER_PAYMENT_STATUSES.PAID) {
+    return deliverPrepaidOrder(actor, order);
+  }
+
+  if (!paymentMethod) {
+    throw new BadRequestError("paymentMethod is required to collect this order.");
+  }
+
   const branch = await resolveBranchPaymentMethod(order.foodtruckId, paymentMethod);
 
   const delivered = await withTransaction(async (client) => {
@@ -484,9 +494,36 @@ export async function deliverOrder(actor, orderId, { paymentMethod, cashReceived
     change: paymentMethod === "cash" ? round(cashReceived - delivered.total) : 0,
   };
 
-  const pointsEarned = await loyaltyService.awardForOrder(delivered, {
-    tenantId: delivered.tenantId,
-    branchId: branch._id,
+  return withLoyaltyPoints(result, branch._id);
+}
+
+/** Entrega un domicilio que ya estaba pagado: no cobra, no exige caja ni toca sus totales. */
+async function deliverPrepaidOrder(actor, order) {
+  const delivered = await withTransaction(async (client) => {
+    const locked = await orderRepository.lockOrder(client, order._id);
+
+    if (locked.status !== ORDER_STATUSES.OUT_FOR_DELIVERY) {
+      throw new ConflictError("Only orders out for delivery can be delivered.");
+    }
+
+    if (locked.paymentStatus !== ORDER_PAYMENT_STATUSES.PAID) {
+      throw new ConflictError("The order payment changed. Reload and try again.");
+    }
+
+    return orderRepository.setStatus(client, locked._id, {
+      status: ORDER_STATUSES.DELIVERED,
+      actorId: actor._id,
+    });
+  });
+
+  return withLoyaltyPoints({ order: delivered, change: 0 }, order.foodtruckId);
+}
+
+/** Suma los puntos del pedido entregado (una sola vez por pedido) a la respuesta. */
+async function withLoyaltyPoints(result, branchId) {
+  const pointsEarned = await loyaltyService.awardForOrder(result.order, {
+    tenantId: result.order.tenantId,
+    branchId,
   });
 
   if (pointsEarned !== null) {
