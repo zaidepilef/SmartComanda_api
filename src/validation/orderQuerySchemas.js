@@ -120,9 +120,12 @@ export const assignDriverSchema = z.strictObject({
 
 export const deliverOrderSchema = z
   .strictObject({
-    paymentMethod: z.enum(DELIVERY_COLLECT_METHODS, {
-      message: "paymentMethod must be cash, debit or credit.",
-    }),
+    // Opcional: un pedido ya pagado se entrega sin cobrar; el servicio lo exige si falta cobrar.
+    paymentMethod: z
+      .enum(DELIVERY_COLLECT_METHODS, {
+        message: "paymentMethod must be cash, debit or credit.",
+      })
+      .optional(),
     cashReceived: z.number().positive().max(10_000_000).optional(),
   })
   .refine((data) => data.paymentMethod !== "cash" || data.cashReceived !== undefined, {
