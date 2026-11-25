@@ -18,6 +18,7 @@ export const USER_ROLES = Object.freeze({
   ADMIN: "admin",
   CASHIER: "cashier",
   COOK: "cook",
+  DRIVER: "driver",
 });
 
 export const USER_ROLES_LIST = Object.freeze([
@@ -26,6 +27,7 @@ export const USER_ROLES_LIST = Object.freeze([
   USER_ROLES.ADMIN,
   USER_ROLES.CASHIER,
   USER_ROLES.COOK,
+  USER_ROLES.DRIVER,
 ]);
 
 export function toPublicUser(user) {

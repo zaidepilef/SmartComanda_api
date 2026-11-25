@@ -1,4 +1,5 @@
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { connectPostgres, closePostgres, getPgPool } from "../src/db/postgres.js";
 import { runPgMigrations } from "../src/db/migrations-pg.js";
@@ -47,6 +48,8 @@ function deliveryInput(ctx, delivery) {
     name: "Ana",
     phone: "+56911111111",
     orderType: "delivery",
+    clientRequestId: randomUUID(),
+    expectedPaymentMethod: "cash",
     delivery,
     items: [{ dishId: ctx.dishId, quantity: 1 }],
   });
@@ -64,12 +67,14 @@ test("branch schema: lat and lng go together and within range", () => {
   assert.equal(updateBranchSchema.safeParse({ deliveryAvgSpeedKmh: 2 }).success, false);
 });
 
-test("public order schema: delivery requires an address, qr is the default", () => {
+test("public order schema: delivery requires an address with coordinates, qr is the default", () => {
   const base = {
     tenantId: generateObjectIdHex(),
     branchId: generateObjectIdHex(),
     name: "Ana",
     phone: "+56911111111",
+    clientRequestId: randomUUID(),
+    expectedPaymentMethod: "cash",
     items: [{ dishId: generateObjectIdHex(), quantity: 1 }],
   };
 
@@ -80,6 +85,14 @@ test("public order schema: delivery requires an address, qr is the default", () 
       ...base,
       orderType: "delivery",
       delivery: { address: "Irarrázaval 3000", lat: -33.45 },
+    }).success,
+    false
+  );
+  assert.equal(
+    createPublicOrderSchema.safeParse({
+      ...base,
+      orderType: "delivery",
+      delivery: { address: "Irarrázaval 3000" },
     }).success,
     false
   );
@@ -147,7 +160,7 @@ test("delivery order stores address and the server-computed estimate", async () 
     distanceKm: 0.1,
   });
 
-  const created = await publicService.createPublicOrder(input);
+  const { order: created } = await publicService.createPublicOrder(input);
   assert.equal(created.orderType, "delivery");
   assert.ok(created.deliveryDistanceKm > 7);
   assert.equal(created.deliveryOutOfRange, false);
@@ -161,43 +174,47 @@ test("delivery order stores address and the server-computed estimate", async () 
   assert.equal(order.deliveryEtaMinutes, Math.ceil((order.deliveryDistanceKm / 25) * 60));
 });
 
-test("delivery order without coordinates has no estimate", async () => {
+test("delivery is rejected when the branch has no delivery limit", async () => {
   const ctx = await setup(BRANCH_POINT);
-  const created = await publicService.createPublicOrder(
-    deliveryInput(ctx, { address: "Irarrázaval 3000, Ñuñoa" })
+  await assert.rejects(
+    publicService.createPublicOrder(
+      deliveryInput(ctx, { address: "Irarrázaval 3000, Ñuñoa", ...CUSTOMER_POINT })
+    ),
+    (error) => error.code === "DELIVERY_UNAVAILABLE"
   );
-  assert.equal(created.deliveryDistanceKm, null);
-  assert.equal(created.deliveryOutOfRange, null);
 });
 
-test("app delivery orders stay out of the kitchen until charged and appear in the report", async () => {
+test("out-of-range delivery is rejected; in-range app delivery goes to the kitchen and the report", async () => {
   const ctx = await setup({ ...BRANCH_POINT, deliveryMaxKm: 5 });
-  const created = await publicService.createPublicOrder(
-    deliveryInput(ctx, { address: "Irarrázaval 3000, Ñuñoa", ...CUSTOMER_POINT })
+
+  await assert.rejects(
+    publicService.createPublicOrder(
+      deliveryInput(ctx, { address: "Irarrázaval 3000, Ñuñoa", ...CUSTOMER_POINT })
+    ),
+    (error) => error.code === "DELIVERY_OUT_OF_RANGE"
+  );
+
+  const nearPoint = { lat: -33.4405, lng: -70.6450 };
+  const { order: created } = await publicService.createPublicOrder(
+    deliveryInput(ctx, { address: "Merced 800, Santiago", ...nearPoint })
   );
   const admin = ctx.actor("admin");
 
   const kitchen = await orderService.listOrders(admin, { branchId: ctx.branchId, kitchen: true });
-  assert.equal(kitchen.some((order) => order._id === created.orderId), false);
-
-  const queue = await orderService.listOrders(admin, {
-    branchId: ctx.branchId,
-    orderType: ["qr", "delivery"],
-    paymentStatus: "pending",
-  });
-  assert.equal(queue.some((order) => order._id === created.orderId), true);
+  const inKitchen = kitchen.find((order) => order._id === created.orderId);
+  assert.ok(inKitchen, "app delivery orders enter the kitchen with the payment pending");
+  assert.equal(inKitchen.paymentStatus, "pending");
 
   const report = await orderService.getDeliveryAnalytics(admin, { branchId: ctx.branchId });
   assert.equal(report.branch.lat, BRANCH_POINT.lat);
   assert.equal(report.summary.totalOrders, 1);
   assert.equal(report.summary.withEstimate, 1);
-  assert.equal(report.summary.outOfRangeCount, 1);
-  assert.equal(report.summary.outOfRangePct, 100);
+  assert.equal(report.summary.outOfRangeCount, 0);
   assert.deepEqual(
     report.summary.buckets.map((bucket) => bucket.count),
-    [0, 0, 1, 0]
+    [1, 0, 0, 0]
   );
-  assert.equal(report.orders[0].deliveryAddress, "Irarrázaval 3000, Ñuñoa");
+  assert.equal(report.orders[0].deliveryAddress, "Merced 800, Santiago");
 });
 
 test("summarizeDeliveryOrders handles orders without estimate", () => {

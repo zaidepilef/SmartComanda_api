@@ -1,4 +1,5 @@
 import * as journeyEventRepository from "../repositories/journeyEventRepository.js";
+import { normalizeChileanMobile } from "../utils/phone.js";
 import * as branchRepository from "../repositories/branchRepository.js";
 import * as customerService from "./customerService.js";
 import * as branchService from "./branchService.js";
@@ -94,11 +95,14 @@ export async function recordOrderOutcome({ sessionId, tenantId, branchId, phone,
     return false;
   }
 
-  const created = status === 201 && body?.orderId;
+  const created = (status === 201 || status === 200) && body?.orderId;
   let customerId = null;
 
   if (typeof phone === "string" && phone.trim() !== "") {
-    const customer = await customerService.getCustomerByPhone({ tenantId, phone: phone.trim() });
+    const customer = await customerService.getCustomerByPhone({
+      tenantId,
+      phone: normalizeChileanMobile(phone) ?? phone.trim(),
+    });
     customerId = customer?._id ?? null;
   }
 
