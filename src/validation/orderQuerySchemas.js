@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  DELIVERY_COLLECT_METHODS,
   ORDER_PAYMENT_STATUSES_LIST,
   ORDER_STATUSES_LIST,
   ORDER_TYPES,
@@ -34,6 +35,10 @@ export const listOrdersQuerySchema = z.object({
   to: z.string().datetime({ offset: true }).optional(),
   q: z.string().trim().min(1).optional(),
   kitchen: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === "true"),
+  appDeliveryOnly: z
     .enum(["true", "false"])
     .optional()
     .transform((value) => value === "true"),
@@ -95,4 +100,36 @@ export const deliveryAnalyticsQuerySchema = z.object({
     .optional(),
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
+});
+
+export const rejectOrderSchema = z.strictObject({
+  reason: z
+    .string({ message: "reason is required." })
+    .trim()
+    .min(3, "reason must be at least 3 characters.")
+    .max(200, "reason must be at most 200 characters."),
+});
+
+export const dispatchOrderSchema = z.strictObject({
+  driverId: z.string().regex(OBJECT_ID_PATTERN, "driverId must be a valid ObjectId.").optional(),
+});
+
+export const assignDriverSchema = z.strictObject({
+  driverId: z.string().regex(OBJECT_ID_PATTERN, "driverId must be a valid ObjectId."),
+});
+
+export const deliverOrderSchema = z
+  .strictObject({
+    paymentMethod: z.enum(DELIVERY_COLLECT_METHODS, {
+      message: "paymentMethod must be cash, debit or credit.",
+    }),
+    cashReceived: z.number().positive().max(10_000_000).optional(),
+  })
+  .refine((data) => data.paymentMethod !== "cash" || data.cashReceived !== undefined, {
+    message: "cashReceived is required for cash payments.",
+    path: ["cashReceived"],
+  });
+
+export const declinePaymentSchema = z.strictObject({
+  note: z.string().trim().max(200, "note must be at most 200 characters.").optional(),
 });

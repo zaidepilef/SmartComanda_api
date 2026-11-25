@@ -9,8 +9,13 @@ import {
 } from "../middleware/validation.js";
 import { createOrderSchema } from "../validation/orderSchemas.js";
 import {
+  assignDriverSchema,
   cancelOrderSchema,
   correctOrderSchema,
+  declinePaymentSchema,
+  deliverOrderSchema,
+  dispatchOrderSchema,
+  rejectOrderSchema,
   deliveryAnalyticsQuerySchema,
   getOrderParamsSchema,
   listOrdersQuerySchema,
@@ -62,6 +67,41 @@ router.post(
   orderParams,
   validateBody(cancelOrderSchema),
   orderController.cancelOrder
+);
+router.post(
+  "/:id/reject",
+  requirePermission("order.reject"),
+  orderParams,
+  validateBody(rejectOrderSchema),
+  orderController.rejectOrder
+);
+router.post(
+  "/:id/dispatch",
+  requirePermission("order.dispatch"),
+  orderParams,
+  validateBody(dispatchOrderSchema),
+  orderController.dispatchOrder
+);
+router.put(
+  "/:id/driver",
+  requirePermission("order.assign"),
+  orderParams,
+  validateBody(assignDriverSchema),
+  orderController.assignDriver
+);
+router.post(
+  "/:id/deliver",
+  requirePermission("order.collect"),
+  orderParams,
+  validateBody(deliverOrderSchema),
+  orderController.deliverOrder
+);
+router.post(
+  "/:id/payment-declined",
+  requirePermission("order.collect"),
+  orderParams,
+  validateBody(declinePaymentSchema),
+  orderController.declinePayment
 );
 router.put(
   "/:id/items",

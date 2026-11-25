@@ -127,6 +127,199 @@ export async function cancelOrder(req, res) {
 
 /**
  * @swagger
+ * /api/orders/{id}/reject:
+ *   post:
+ *     summary: Rechazar un pedido de la app
+ *     description: >
+ *       Cajero, Encargado, owner o sysadmin. Solo pedidos hechos desde la app del cliente
+ *       (retiro o domicilio) en estado `new` y no cobrados. Exige motivo, que el cliente ve
+ *       en el seguimiento. El pago queda `voided`.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason: { type: string, minLength: 3, maxLength: 200 }
+ *     responses:
+ *       200: { description: Pedido rechazado }
+ *       400: { description: Motivo inválido }
+ *       403: { description: El rol no permite rechazar }
+ *       404: { description: Pedido no encontrado }
+ *       409: { description: El pedido no es de la app, ya está en preparación o está cobrado }
+ */
+export async function rejectOrder(req, res) {
+  try {
+    const order = await orderService.rejectOrder(req.user, req.params.id, req.body.reason);
+    return res.json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
+ * /api/orders/{id}/dispatch:
+ *   post:
+ *     summary: Salir a reparto
+ *     description: >
+ *       Pasa un domicilio de la app de `ready` a `out_for_delivery`. El repartidor se lo
+ *       asigna a sí mismo; Encargado o superior puede indicar `driverId`.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               driverId: { type: string }
+ *     responses:
+ *       200: { description: Pedido en reparto }
+ *       403: { description: El rol no permite despachar o asignar }
+ *       409: { description: El pedido no está listo o ya lo tomó otro repartidor }
+ */
+export async function dispatchOrder(req, res) {
+  try {
+    const order = await orderService.dispatchOrder(req.user, req.params.id, req.body);
+    return res.json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
+ * /api/orders/{id}/driver:
+ *   put:
+ *     summary: Reasignar repartidor
+ *     description: Encargado o superior. Pedido `ready` u `out_for_delivery`.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [driverId]
+ *             properties:
+ *               driverId: { type: string }
+ *     responses:
+ *       200: { description: Repartidor asignado }
+ *       400: { description: Repartidor no válido para la sucursal }
+ *       409: { description: Estado no reasignable }
+ */
+export async function assignDriver(req, res) {
+  try {
+    const order = await orderService.assignDriver(req.user, req.params.id, req.body.driverId);
+    return res.json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
+ * /api/orders/{id}/deliver:
+ *   post:
+ *     summary: Cobrar y entregar un domicilio
+ *     description: >
+ *       Repartidor asignado o Encargado o superior. En una transacción registra el cobro en la
+ *       caja abierta de la sucursal y marca el pedido como `delivered`. En efectivo exige
+ *       `cashReceived` mayor o igual al total y devuelve el vuelto.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [paymentMethod]
+ *             properties:
+ *               paymentMethod: { type: string, enum: [cash, debit, credit] }
+ *               cashReceived: { type: number }
+ *     responses:
+ *       200: { description: "Pedido pagado y entregado: { order, change, pointsEarned? }" }
+ *       400: { description: Efectivo insuficiente o medio no habilitado }
+ *       403: { description: Pedido asignado a otro repartidor }
+ *       409: { description: Pedido no en reparto, ya pagado o sin caja abierta }
+ */
+export async function deliverOrder(req, res) {
+  try {
+    const result = await orderService.deliverOrder(req.user, req.params.id, req.body);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
+ * /api/orders/{id}/payment-declined:
+ *   post:
+ *     summary: Registrar cobro con tarjeta rechazado en la entrega
+ *     description: El pago queda `declined` y el pedido sigue en reparto; se puede cobrar después.
+ *     tags: [Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               note: { type: string, maxLength: 200 }
+ *     responses:
+ *       200: { description: Rechazo registrado }
+ *       403: { description: Pedido asignado a otro repartidor }
+ *       409: { description: Pedido no en reparto o ya pagado }
+ */
+export async function declinePayment(req, res) {
+  try {
+    const order = await orderService.declinePayment(req.user, req.params.id, req.body.note);
+    return res.json(order);
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+/**
+ * @swagger
  * /api/orders/{id}/items:
  *   put:
  *     summary: Corregir los ítems de un pedido

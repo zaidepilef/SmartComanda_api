@@ -47,14 +47,37 @@ export function rowToOrder(row) {
     deliveryDistanceKm: numberOrNull(row.delivery_distance_km),
     deliveryEtaMinutes: numberOrNull(row.delivery_eta_minutes),
     deliveryOutOfRange: row.delivery_out_of_range ?? null,
+    expectedPaymentMethod: row.expected_payment_method ?? null,
+    cashTendered: numberOrNull(row.cash_tendered),
+    clientRequestId: row.client_request_id ?? null,
+    customerAddressId: row.customer_address_id ?? null,
+    driverId: row.driver_id ?? null,
+    driverName: row.driver_name ?? null,
+    paymentHistory: row.payment_history ?? [],
+    rejectionReason: row.rejection_reason ?? null,
+    rejectedBy: row.rejected_by ?? null,
+    rejectedAt: row.rejected_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-/** Columnas de pedido más el nombre de quien lo cobró. */
-const ORDER_SELECT = `SELECT o.*, NULLIF(TRIM(CONCAT(pu.first_name, ' ', pu.last_name)), '') AS paid_by_name
-   FROM orders o LEFT JOIN users pu ON pu.id = o.paid_by`;
+/** Columnas de pedido más el nombre de quien lo cobró y del repartidor. */
+const ORDER_SELECT = `SELECT o.*,
+     NULLIF(TRIM(CONCAT(pu.first_name, ' ', pu.last_name)), '') AS paid_by_name,
+     NULLIF(TRIM(CONCAT(du.first_name, ' ', du.last_name)), '') AS driver_name
+   FROM orders o
+   LEFT JOIN users pu ON pu.id = o.paid_by
+   LEFT JOIN users du ON du.id = o.driver_id`;
+
+/** Pedido a domicilio hecho desde la app (tiene dirección). */
+const APP_DELIVERY_SQL = `(o.order_type = 'delivery' AND o.delivery_address IS NOT NULL)`;
+
+function paymentEntry(status, { method = null, actorId = null, note = null } = {}) {
+  return JSON.stringify([
+    { status, method, at: new Date(), by: actorId ? String(actorId) : null, note },
+  ]);
+}
 
 function escapeLike(text) {
   return text.replace(/[\\%_]/g, "\\$&");
@@ -71,6 +94,8 @@ export async function listOrders({
   to,
   q,
   kitchen,
+  appDeliveryOnly,
+  driverId,
   limit,
   offset,
 }) {
@@ -139,11 +164,20 @@ export async function listOrders({
   }
 
   if (kitchen) {
-    // Cocina no ve los pedidos de la app del cliente (QR o domicilio) hasta que se cobran.
-    conditions.push(
-      `NOT ((o.order_type = 'qr' OR (o.order_type = 'delivery' AND o.delivery_address IS NOT NULL))
-        AND o.payment_status = 'pending')`
-    );
+    // Cocina no ve los retiros de la app hasta que se cobran; los domicilios de la
+    // app entran con el pago pendiente. Rechazados y en reparto ya no son de cocina.
+    conditions.push(`NOT (o.order_type = 'qr' AND o.payment_status = 'pending')`);
+    conditions.push(`o.status NOT IN ('rejected', 'out_for_delivery')`);
+  }
+
+  if (appDeliveryOnly) {
+    conditions.push(APP_DELIVERY_SQL);
+  }
+
+  if (driverId !== undefined) {
+    // Un repartidor solo ve en reparto los pedidos que tomó él.
+    params.push(String(driverId));
+    conditions.push(`(o.status <> 'out_for_delivery' OR o.driver_id = $${params.length})`);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -222,9 +256,11 @@ export async function createOrder(order, client = getPgPool()) {
         payment_method, client_contact, client_phone, client_name, points_awarded,
         items, status_history, total, cash_session_id, paid_at, paid_by,
         delivery_address, delivery_reference, delivery_lat, delivery_lng, delivery_accuracy_m,
-        delivery_distance_km, delivery_eta_minutes, delivery_out_of_range)
+        delivery_distance_km, delivery_eta_minutes, delivery_out_of_range,
+        expected_payment_method, cash_tendered, client_request_id, customer_address_id,
+        payment_history, tracking_token_hash)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-             $19, $20, $21, $22, $23, $24, $25, $26)
+             $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
      RETURNING *`,
     [
       id,
@@ -253,10 +289,44 @@ export async function createOrder(order, client = getPgPool()) {
       order.deliveryDistanceKm ?? null,
       order.deliveryEtaMinutes ?? null,
       order.deliveryOutOfRange ?? null,
+      order.expectedPaymentMethod ?? null,
+      order.cashTendered ?? null,
+      order.clientRequestId ?? null,
+      order.customerAddressId ?? null,
+      JSON.stringify(
+        order.paymentHistory ?? [
+          {
+            status: order.paymentStatus ?? "pending",
+            method: order.paymentMethod ?? null,
+            at: new Date(),
+            by: order.paidBy ? String(order.paidBy) : null,
+            note: null,
+          },
+        ]
+      ),
+      order.trackingTokenHash ?? null,
     ]
   );
 
   return rowToOrder(rows[0]);
+}
+
+export async function findByClientRequestId(tenantId, clientRequestId) {
+  const { rows } = await getPgPool().query(
+    `${ORDER_SELECT} WHERE o.tenant_id = $1 AND o.client_request_id = $2`,
+    [tenantId, clientRequestId]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+export async function findByTrackingTokenHash(tenantId, tokenHash) {
+  const { rows } = await getPgPool().query(
+    `${ORDER_SELECT} WHERE o.tenant_id = $1 AND o.tracking_token_hash = $2`,
+    [tenantId, tokenHash]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
 }
 
 export async function updateOrderItems(orderId, items) {
@@ -294,30 +364,125 @@ export async function lockOrder(client, orderId) {
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
 }
 
-/** Marca como cobrado un pedido pendiente y lo asocia a la caja. */
-export async function markPaid(client, orderId, { paymentMethod, cashSessionId, paidBy }) {
+/** Marca como cobrado un pedido pendiente (o con cobro rechazado) y lo asocia a la caja. */
+export async function markPaid(client, orderId, { paymentMethod, cashSessionId, paidBy, note = null }) {
   const { rows } = await client.query(
     `UPDATE orders
      SET payment_status = 'paid', payment_method = $2, cash_session_id = $3,
-         paid_at = NOW(), paid_by = $4, updated_at = NOW()
-     WHERE id = $1 AND payment_status = 'pending' AND status <> 'cancelled'
+         paid_at = NOW(), paid_by = $4, updated_at = NOW(),
+         payment_history = payment_history || $5::jsonb
+     WHERE id = $1 AND payment_status IN ('pending', 'declined')
+       AND status NOT IN ('cancelled', 'rejected')
      RETURNING *`,
-    [orderId, paymentMethod, cashSessionId, paidBy ? String(paidBy) : null]
+    [
+      orderId,
+      paymentMethod,
+      cashSessionId,
+      paidBy ? String(paidBy) : null,
+      paymentEntry("paid", { method: paymentMethod, actorId: paidBy, note }),
+    ]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+/** Cambia el estado operativo dentro de una transacción y lo registra en el historial. */
+export async function setStatus(client, orderId, { status, actorId, driverId }) {
+  const params = [orderId, status, historyEntry(status, actorId)];
+  let driverClause = "";
+
+  if (driverId !== undefined) {
+    params.push(driverId ? String(driverId) : null);
+    driverClause = `, driver_id = $${params.length}`;
+  }
+
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET status = $2, updated_at = NOW(),
+         status_history = status_history || $3::jsonb ${driverClause}
+     WHERE id = $1
+     RETURNING *`,
+    params
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+/** Asigna o reasigna el repartidor sin cambiar el estado. */
+export async function setDriver(client, orderId, { driverId, actorId }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET driver_id = $2, updated_at = NOW(),
+         status_history = status_history || $3::jsonb
+     WHERE id = $1
+     RETURNING *`,
+    [
+      orderId,
+      String(driverId),
+      JSON.stringify([
+        { status: "driver_assigned", at: new Date(), by: actorId ? String(actorId) : null, driverId: String(driverId) },
+      ]),
+    ]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+/** El local rechaza un pedido de la app: estado `rejected` y pago `voided`. */
+export async function markRejected(client, orderId, { reason, actorId }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET status = 'rejected', payment_status = 'voided',
+         rejection_reason = $2, rejected_by = $3, rejected_at = NOW(), updated_at = NOW(),
+         status_history = status_history || $4::jsonb,
+         payment_history = payment_history || $5::jsonb
+     WHERE id = $1
+     RETURNING *`,
+    [
+      orderId,
+      reason,
+      actorId ? String(actorId) : null,
+      historyEntry("rejected", actorId),
+      paymentEntry("voided", { actorId, note: reason }),
+    ]
+  );
+
+  return rows.length > 0 ? rowToOrder(rows[0]) : null;
+}
+
+/** Registra un cobro con tarjeta rechazado en la entrega; no cambia el estado operativo. */
+export async function markPaymentDeclined(client, orderId, { actorId, note }) {
+  const { rows } = await client.query(
+    `UPDATE orders
+     SET payment_status = 'declined', updated_at = NOW(),
+         payment_history = payment_history || $2::jsonb
+     WHERE id = $1
+     RETURNING *`,
+    [orderId, paymentEntry("declined", { actorId, note: note ?? null })]
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;
 }
 
 export async function markCancelled(client, orderId, { reason, actorId, refunded }) {
+  const paymentStatus = refunded ? "refunded" : "voided";
   const { rows } = await client.query(
     `UPDATE orders
      SET status = 'cancelled',
-         payment_status = CASE WHEN $4 THEN 'refunded' ELSE payment_status END,
+         payment_status = $4,
          cancel_reason = $2, cancelled_by = $3, cancelled_at = NOW(), updated_at = NOW(),
-         status_history = status_history || $5::jsonb
+         status_history = status_history || $5::jsonb,
+         payment_history = payment_history || $6::jsonb
      WHERE id = $1
      RETURNING *`,
-    [orderId, reason, actorId ? String(actorId) : null, Boolean(refunded), historyEntry("cancelled", actorId)]
+    [
+      orderId,
+      reason,
+      actorId ? String(actorId) : null,
+      paymentStatus,
+      historyEntry("cancelled", actorId),
+      paymentEntry(paymentStatus, { actorId, note: reason }),
+    ]
   );
 
   return rows.length > 0 ? rowToOrder(rows[0]) : null;

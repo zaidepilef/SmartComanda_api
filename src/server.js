@@ -16,6 +16,7 @@ import ordersRouter from "./routes/orders.js";
 import cashSessionsRouter from "./routes/cash-sessions.js";
 import publicRouter from "./routes/public.js";
 import publicEventsRouter from "./routes/publicEvents.js";
+import publicTrackingRouter from "./routes/publicTracking.js";
 import { purgeExpiredEvents } from "./services/journeyService.js";
 import swaggerSpec from "./config/swagger.js";
 
@@ -43,6 +44,7 @@ app.use("/api/orders", ordersRouter);
 app.use("/api/cash-sessions", cashSessionsRouter);
 // Antes de /api/public para usar su propio límite de tasa.
 app.use("/api/public/events", publicEventsRouter);
+app.use("/api/public/orders/track", publicTrackingRouter);
 app.use("/api/public", publicRouter);
 
 if (env.enableApiDocs) {
