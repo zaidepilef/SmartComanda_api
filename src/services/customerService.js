@@ -8,7 +8,28 @@ export const MAX_SAVED_ADDRESSES = 5;
 const SAME_ADDRESS_METERS = 30;
 
 export async function upsertCustomer({ tenantId, phone, name }) {
-  return customerRepository.upsertCustomer({ tenantId, phone, firstName: name });
+  const existing = name ? await customerRepository.findByTenantAndPhone(tenantId, phone) : null;
+  const firstName = resolveCustomerName(existing?.firstName, name);
+  return customerRepository.upsertCustomer({ tenantId, phone, firstName });
+}
+
+/**
+ * Nombre a guardar para un cliente. La app saluda al cliente conocido solo con su
+ * primer nombre; si lo confirma sin cambios, se conserva el nombre completo guardado.
+ * Cualquier otro nombre lo reemplaza.
+ */
+export function resolveCustomerName(storedName, incomingName) {
+  const incoming = String(incomingName ?? "").trim();
+
+  if (!incoming) {
+    return null;
+  }
+
+  const stored = String(storedName ?? "").trim();
+  const isOnlyStoredFirstName =
+    stored.includes(" ") && !incoming.includes(" ") && normalizeText(incoming) === normalizeText(firstNameOf(stored));
+
+  return isOnlyStoredFirstName ? stored : incoming;
 }
 
 export async function getCustomerByPhone({ tenantId, phone }) {

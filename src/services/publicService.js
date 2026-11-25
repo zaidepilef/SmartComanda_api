@@ -303,7 +303,7 @@ export async function createPublicOrder({
       number,
       orderType,
       paymentStatus: ORDER_PAYMENT_STATUSES.PENDING,
-      clientName: name,
+      clientName: customer?.firstName ?? name,
       clientPhone: phone,
       items: orderItems,
       total,

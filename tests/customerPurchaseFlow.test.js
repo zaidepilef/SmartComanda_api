@@ -208,6 +208,29 @@ test("addresses: reused within 30 m, saved addressId works, at most 5 kept", asy
 
 // ── Pedido público ───────────────────────────────────────────────────
 
+test("customer name: confirming only the first name keeps the full name", async () => {
+  assert.equal(customerService.resolveCustomerName("Ana Pérez", "ana"), "Ana Pérez");
+  assert.equal(customerService.resolveCustomerName("Ana Pérez", "Ána"), "Ana Pérez");
+  assert.equal(customerService.resolveCustomerName("Ana Pérez", "Ana María Soto"), "Ana María Soto");
+  assert.equal(customerService.resolveCustomerName("Ana Pérez", "Beatriz"), "Beatriz");
+  assert.equal(customerService.resolveCustomerName("Ana", "Ana"), "Ana");
+  assert.equal(customerService.resolveCustomerName(null, "Ana"), "Ana");
+  assert.equal(customerService.resolveCustomerName("Ana Pérez", "  "), null);
+
+  const ctx = await setup();
+  await publicService.createPublicOrder(orderInput(ctx));
+  const { order } = await publicService.createPublicOrder(orderInput(ctx, { name: "Ana" }));
+
+  const customer = await customerService.getCustomerByPhone({ tenantId: ctx.tenantId, phone: "+56912345678" });
+  assert.equal(customer.firstName, "Ana Pérez");
+  const stored = await orderService.getOrder(await ctx.user("admin"), order.orderId);
+  assert.equal(stored.clientName, "Ana Pérez");
+
+  await publicService.createPublicOrder(orderInput(ctx, { name: "Ana Soto" }));
+  const renamed = await customerService.getCustomerByPhone({ tenantId: ctx.tenantId, phone: "+56912345678" });
+  assert.equal(renamed.firstName, "Ana Soto");
+});
+
 test("public order: pending, notes stored, extra payment fields ignored", async () => {
   const ctx = await setup();
   const input = orderInput(ctx);
