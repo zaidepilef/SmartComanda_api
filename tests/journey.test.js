@@ -101,6 +101,23 @@ test("batch schema: rejects order_created from the client, extra fields and over
   );
 });
 
+test("batch schema: purchase flow events accept only non-personal data", () => {
+  const ids = { tenantId: generateObjectIdHex(), branchId: generateObjectIdHex(), sessionId: randomUUID() };
+  const parse = (event) =>
+    journeyEventBatchSchema.safeParse({ ...ids, events: [{ occurredAt: now(), ...event }] }).success;
+
+  assert.equal(parse({ type: "mode_selected", data: { mode: "delivery" } }), true);
+  assert.equal(parse({ type: "mode_selected", data: { mode: "dine_in" } }), false);
+  assert.equal(parse({ type: "customer_looked_up", data: { known: true } }), true);
+  assert.equal(parse({ type: "customer_looked_up", data: { known: true, phone: PHONE } }), false);
+  assert.equal(parse({ type: "address_confirmed", data: { source: "saved" } }), true);
+  assert.equal(parse({ type: "address_confirmed", data: { source: "new", address: "Merced 800" } }), false);
+  assert.equal(parse({ type: "address_out_of_range", data: { distanceKm: 7.4 } }), true);
+  assert.equal(parse({ type: "address_out_of_range", data: { distanceKm: 7.4, lat: -33.4 } }), false);
+  assert.equal(parse({ type: "summary_opened", data: { itemCount: 2, total: 7000 } }), true);
+  assert.equal(parse({ type: "summary_opened", data: { itemCount: 2, total: 7000, name: "Ana" } }), false);
+});
+
 test("range schema: defaults to last 24h and rejects ranges over 31 days", () => {
   const parsed = journeyRangeQuerySchema.parse({});
   assert.ok(parsed.to - parsed.from === 24 * 60 * 60 * 1000);

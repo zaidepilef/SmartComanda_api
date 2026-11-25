@@ -52,7 +52,7 @@ function handleError(res, error) {
  *                   properties:
  *                     type:
  *                       type: string
- *                       enum: [qr_opened, menu_loaded, menu_failed, identity_submitted, item_added, item_removed, cart_opened, order_submitted, order_failed]
+ *                       enum: [qr_opened, menu_loaded, menu_failed, identity_submitted, item_added, item_removed, cart_opened, order_submitted, order_failed, mode_selected, customer_looked_up, address_confirmed, address_out_of_range, summary_opened]
  *                     occurredAt: { type: string, format: date-time }
  *                     data: { type: object }
  *     responses:

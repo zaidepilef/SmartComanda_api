@@ -66,6 +66,34 @@ const clientEventSchema = z.discriminatedUnion("type", [
     type: z.literal(T.ORDER_FAILED),
     data: z.strictObject({ status: httpStatus, reason }),
   }),
+  z.strictObject({
+    ...base,
+    type: z.literal(T.MODE_SELECTED),
+    data: z.strictObject({ mode: z.enum(["pickup", "delivery"]) }),
+  }),
+  z.strictObject({
+    ...base,
+    type: z.literal(T.CUSTOMER_LOOKED_UP),
+    data: z.strictObject({ known: z.boolean() }),
+  }),
+  z.strictObject({
+    ...base,
+    type: z.literal(T.ADDRESS_CONFIRMED),
+    data: z.strictObject({ source: z.enum(["saved", "new"]) }),
+  }),
+  z.strictObject({
+    ...base,
+    type: z.literal(T.ADDRESS_OUT_OF_RANGE),
+    data: z.strictObject({ distanceKm: z.number().min(0).max(1000) }),
+  }),
+  z.strictObject({
+    ...base,
+    type: z.literal(T.SUMMARY_OPENED),
+    data: z.strictObject({
+      itemCount: z.number().int().min(1).max(999),
+      total: z.number().min(0).max(100_000_000),
+    }),
+  }),
 ]);
 
 export const journeyEventBatchSchema = z.strictObject({
