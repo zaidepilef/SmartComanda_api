@@ -249,7 +249,9 @@ export async function assignDriver(req, res) {
  *     description: >
  *       Repartidor asignado o Encargado o superior. En una transacción registra el cobro en la
  *       caja abierta de la sucursal y marca el pedido como `delivered`. En efectivo exige
- *       `cashReceived` mayor o igual al total y devuelve el vuelto.
+ *       `cashReceived` mayor o igual al total y devuelve el vuelto. Si el pedido ya estaba
+ *       pagado (cobrado en caja antes del cobro contra entrega), solo lo marca `delivered`:
+ *       no exige caja abierta, no cambia el pago y `paymentMethod` se ignora.
  *     tags: [Orders]
  *     security:
  *       - bearerAuth: []
@@ -264,15 +266,14 @@ export async function assignDriver(req, res) {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [paymentMethod]
  *             properties:
- *               paymentMethod: { type: string, enum: [cash, debit, credit] }
+ *               paymentMethod: { type: string, enum: [cash, debit, credit], description: "Obligatorio si el pedido no está pagado" }
  *               cashReceived: { type: number }
  *     responses:
  *       200: { description: "Pedido pagado y entregado: { order, change, pointsEarned? }" }
- *       400: { description: Efectivo insuficiente o medio no habilitado }
+ *       400: { description: Falta el medio de pago, efectivo insuficiente o medio no habilitado }
  *       403: { description: Pedido asignado a otro repartidor }
- *       409: { description: Pedido no en reparto, ya pagado o sin caja abierta }
+ *       409: { description: Pedido no en reparto, anulado o sin caja abierta }
  */
 export async function deliverOrder(req, res) {
   try {
